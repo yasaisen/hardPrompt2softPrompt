@@ -112,7 +112,7 @@ class PrefixTuningPolicyModel(nn.Module):
             
             generated_tokens.append(next_token_id)
             sum_logprob += log_prob.item()
-            probs_list.append(probs)
+            probs_list.append(probs.unsqueeze(0))
             
             if next_token_id == self.tokenizer.eos_token_id:
                 break
@@ -125,6 +125,7 @@ class PrefixTuningPolicyModel(nn.Module):
         self, 
         messages_ids, 
         response_ids, 
+        use_prefix: bool,
         temperature: float = 1.0
     ):
         ### get full response logits from forward pass response to policy model ###
@@ -134,7 +135,7 @@ class PrefixTuningPolicyModel(nn.Module):
         # print(self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
         # print('================================================input_ids decode')
 
-        logits = self(combined_ids, use_prefix=True)
+        logits = self(combined_ids, use_prefix=use_prefix)
         response_logits = logits[:, -response_ids.shape[1]:] # [1, seq_len + 1, 256000]
 
 
@@ -181,7 +182,6 @@ class PrefixTuningPolicyModel(nn.Module):
         """
         kill first [     2,    106,   1645,    108,   3940,    107,    108] tokens
         """
-
 
         if attention_mask is None:
             attention_mask = torch.ones(batch_size, seq_len, dtype=torch.long, device=input_ids.device)
@@ -301,7 +301,10 @@ class PrefixTuningPolicyModel(nn.Module):
 
         if cfg['model'].get('policy_model') is not None:
             policy_model_cfg = cfg['model']['policy_model']
-            policy_model_path = os.path.join(root_path, policy_model_cfg.get("reward_model_path"))
+            if policy_model_cfg.get("policy_model_path") == "":
+                policy_model_path = None
+            else:
+                policy_model_path = os.path.join(root_path, policy_model_cfg.get("policy_model_path"))
             policy_model_name = str(policy_model_cfg.get("policy_model_name"))
             prefix_prompt = str(policy_model_cfg.get("prefix_prompt"))
             torch_dtype = dtype_map[str(policy_model_cfg.get("torch_dtype"))]
@@ -314,7 +317,7 @@ class PrefixTuningPolicyModel(nn.Module):
             device=device, 
         )
         return model
-
+    
 
 
 
