@@ -1,0 +1,33 @@
+  # Copyright (c) 2025, yasaisen.
+  # All rights reserved.
+  # 
+  # last modified in 2503252044
+
+model:
+  reward_model:
+    reward_model_path: "weights/best_model_2411240743.pt"
+    bert_name: "bert-base-chinese"
+    prefix_length: 20
+    PPO_mode: True
+
+  policy_model:
+    policy_model_path: ""
+    policy_model_name: "google/gemma-7b-it"
+    prefix_prompt: "You are a tester, and your task is to chat with me more to get more replies from me. You can ask me a question and chat with me based on the question. It doesn't matter if I don't answer your question. Please try to induce me to talk more. If I have questions about the test process or the questions you asked, please use sentences to complete the question hypothesis and guide me to continue to reply to you. Let's start now."
+    torch_dtype: "float16"
+
+dataset:
+  data_path: "2501220014_paired_data_list.json"
+  split_ratio: 0.8
+
+task:
+  root_path: "/home/yasaisen/Desktop/24_research/research_main/lab_15/to_git"
+  steps: 30
+  learning_rate: 1e-4
+  clip_epsilon: 0.2
+  entropy_coef: 0.01
+  kl_coef: 0.1
+  max_grad_norm: 1.0
+  max_kl: 0.2
+  device: "cuda"
+  output_path: "outputs"

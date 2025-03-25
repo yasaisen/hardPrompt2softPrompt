@@ -2,12 +2,13 @@
  Copyright (c) 2025, yasaisen.
  All rights reserved.
 
- last modified in 2503111826
+ last modified in 2503252044
 """
 
 import torch
 import torch.nn as nn
 from transformers import BertModel, BertTokenizer
+import os
 
 from ...common.utils import log_print, get_trainable_params
 
@@ -146,6 +147,27 @@ class ComparativeRewardModel(nn.Module):
         else:
             return input_ids
         
+    @classmethod
+    def from_config(cls, cfg):
+        root_path = cfg['task'].get("root_path")
+        device = str(cfg['task'].get("device"))
+
+        if cfg['model'].get('reward_model') is not None:
+            reward_model_cfg = cfg['model']['reward_model']
+            reward_model_path = os.path.join(root_path, reward_model_cfg.get("reward_model_path"))
+            bert_name = str(reward_model_cfg.get("bert_name"))
+            prefix_length = int(reward_model_cfg.get("prefix_length"))
+            PPO_mode = bool(reward_model_cfg.get("PPO_mode"))
+
+        model = cls(
+            bert_name=bert_name,
+            prefix_length=prefix_length,
+            pretrain_path=reward_model_path, 
+            PPO_mode=PPO_mode,
+            device=device
+        )
+        return model
+    
 
 
 
@@ -157,3 +179,4 @@ class ComparativeRewardModel(nn.Module):
 
 
 
+    

@@ -2,13 +2,14 @@
  Copyright (c) 2025, yasaisen.
  All rights reserved.
 
- last modified in 2503111826
+ last modified in 2503252044
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import os
 
 from ...common.utils import log_print, get_trainable_params
 
@@ -60,6 +61,7 @@ class PrefixTuningPolicyModel(nn.Module):
         if pretrain_path is not None:
             log_print(self.state_name, f"pretrain_path={pretrain_path}")
             ckpt = torch.load(pretrain_path)
+            ### TODO: model save
             self.prefix_embeddings = nn.Parameter(ckpt['prefix_embeddings_state_dict'])
             log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}")
         
@@ -286,6 +288,33 @@ class PrefixTuningPolicyModel(nn.Module):
 
         return input_ids
     
+    @classmethod
+    def from_config(cls, cfg):
+        root_path = cfg['task'].get("root_path")
+        device = str(cfg['task'].get("device"))
+
+        dtype_map = {
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+        }
+
+        if cfg['model'].get('policy_model') is not None:
+            policy_model_cfg = cfg['model']['policy_model']
+            policy_model_path = os.path.join(root_path, policy_model_cfg.get("reward_model_path"))
+            policy_model_name = str(policy_model_cfg.get("policy_model_name"))
+            prefix_prompt = str(policy_model_cfg.get("prefix_prompt"))
+            torch_dtype = dtype_map[str(policy_model_cfg.get("torch_dtype"))]
+
+        model = cls(
+            model_name=policy_model_name,
+            prefix_prompt=prefix_prompt, 
+            pretrain_path=policy_model_path, 
+            torch_dtype=torch_dtype,
+            device=device, 
+        )
+        return model
+
 
 
 

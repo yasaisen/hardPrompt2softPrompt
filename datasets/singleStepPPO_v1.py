@@ -2,10 +2,11 @@
  Copyright (c) 2025, yasaisen.
  All rights reserved.
 
- last modified in 2503111857
+ last modified in 2503252044
 """
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, random_split
+import ast
 
 from ..common.utils import log_print, load_data
 
@@ -14,10 +15,8 @@ class singleStepPPO_v1_Dataset(Dataset):
     def __init__(self, 
         data_path, 
         # split,
-        device='cuda',
     ):
         self.state_name = 'singleStepPPO_v1_Dataset'
-        self.device = device
         print()
         log_print(self.state_name, "Building...")
 
@@ -34,8 +33,30 @@ class singleStepPPO_v1_Dataset(Dataset):
     def __getitem__(self, idx):
 
         sample = self.data_list[idx]
+
+        context = sample["context"]
+        messages = ast.literal_eval(context)
+        messages[0]['content'] = '好的，題目如下：' + messages[0]['content']
+
+        sample["messages"] = messages
+
         return sample
         
+    @classmethod
+    def from_config(cls, cfg):
+
+        train_data_path = str(cfg['dataset'].get("data_path"))
+        split_ratio = float(cfg['dataset'].get("split_ratio"))
+
+        train_dataset = cls(
+            data_path=train_data_path, 
+        )
+        train_size = int(split_ratio * len(train_dataset))
+        val_size = len(train_dataset) - train_size
+        train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size])
+
+        return train_dataset, val_dataset
+    
 
 
 
@@ -47,4 +68,3 @@ class singleStepPPO_v1_Dataset(Dataset):
 
 
 
-        

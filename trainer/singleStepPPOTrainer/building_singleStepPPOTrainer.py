@@ -2,13 +2,14 @@
  Copyright (c) 2025, yasaisen.
  All rights reserved.
 
- last modified in 2503111826
+ last modified in 2503252044
 """
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from typing import List, Tuple, Dict
+import os
 
 from ...common.utils import log_print, get_trainable_params
 from ...models.rewardModel.modeling_rewardModel import ComparativeRewardModel
@@ -21,13 +22,13 @@ class SingleStepPPOTrainer:
         policy_model: PrefixTuningPolicyModel,
         reward_model: ComparativeRewardModel,
         device: str = "cuda",
-        # PPO¶W°Ñ¼Æ
+        # PPOè¶…åƒæ•¸
         learning_rate: float = 1e-5,
         clip_epsilon: float = 0.2,
         entropy_coef: float = 0.01,
-        kl_coef: float = 0.1,  # KL´²«×«Y¼Æ
+        kl_coef: float = 0.1,  # KLæ•£åº¦ä¿‚æ•¸
         max_grad_norm: float = 1.0,
-        max_kl: float = 0.2,  # KL´²«×ªº³Ì¤jìH­È
+        max_kl: float = 0.2,  # KLæ•£åº¦çš„æœ€å¤§é–¾å€¼
     ):
         self.state_name = 'SingleStepPPOTrainer'
         self.device = device
@@ -37,17 +38,17 @@ class SingleStepPPOTrainer:
         self.policy = policy_model.to(self.device)
         self.reward_model = reward_model.to(self.device)
         
-        # ¥uÀu¤Æpolicy model¤¤ªºprefix°Ñ¼Æ
+        # åªå„ªåŒ–policy modelä¸­çš„prefixåƒæ•¸
         self.optimizer = optim.Adam([self.policy.prefix_embeddings], lr=learning_rate)
         
-        # «O¦s¶W°Ñ¼Æ
+        # ä¿å­˜è¶…åƒæ•¸
         self.clip_epsilon = clip_epsilon
         self.entropy_coef = entropy_coef
         self.kl_coef = kl_coef
         self.max_kl = max_kl
         self.max_grad_norm = max_grad_norm
         
-        # °lÂÜ°V½m²Î­p
+        # è¿½è¹¤è¨“ç·´çµ±è¨ˆ
         self.training_stats = {
             'steps': 0,
             'total_reward': 0,
@@ -122,18 +123,18 @@ class SingleStepPPOTrainer:
         return reward.item()
 
     def get_base_model_probs(self, context_ids: torch.Tensor) -> List[torch.Tensor]:
-        """Àò¨úbase model¦b¨C­Ó®É¶¡¨Bªº·§²v¤À¥¬"""
+        """ç²å–base modelåœ¨æ¯å€‹æ™‚é–“æ­¥çš„æ¦‚ç‡åˆ†å¸ƒ"""
         with torch.no_grad():
             outputs = self.policy.base_model.generate(
                 context_ids,
-                max_new_tokens=50,  # ¥i¥H®Ú¾Ú»İ­n½Õ¾ã
+                max_new_tokens=50,  # å¯ä»¥æ ¹æ“šéœ€è¦èª¿æ•´
                 output_scores=True,
                 return_dict_in_generate=True,
                 pad_token_id=self.policy.tokenizer.pad_token_id,
                 eos_token_id=self.policy.tokenizer.eos_token_id,
             )
             
-            # ±NscoresÂà´«¬°·§²v¤À¥¬
+            # å°‡scoresè½‰æ›ç‚ºæ¦‚ç‡åˆ†å¸ƒ
             base_probs = []
             for score in outputs.scores:
                 probs = F.softmax(score, dim=-1)
@@ -146,7 +147,7 @@ class SingleStepPPOTrainer:
         policy_logits: torch.Tensor,
         base_probs: torch.Tensor,
     ) -> torch.Tensor:
-        """­pºâ¨C­Ó®É¶¡¨BªºKL´²«×"""
+        """è¨ˆç®—æ¯å€‹æ™‚é–“æ­¥çš„KLæ•£åº¦"""
         policy_probs = F.softmax(policy_logits, dim=-1)
         policy_log_probs = F.log_softmax(policy_logits, dim=-1)
         
@@ -168,7 +169,7 @@ class SingleStepPPOTrainer:
 
 
         ##############################################################
-        # Àò¨úbase modelªº·§²v¤À¥¬
+        # ç²å–base modelçš„æ¦‚ç‡åˆ†å¸ƒ
         base_probs, _ = self.get_base_model_probs(messages_ids)
         # print('@@@@@@@@@@@@@@@@', base_probs)
         # print('@@@@@@@@@@@@@@@@', base_probs_)
@@ -184,10 +185,10 @@ class SingleStepPPOTrainer:
         # print(point_loss)
         print('================================================')
 
-        # ­pºâ»Pbase modelªºKL´²«×
+        # è¨ˆç®—èˆ‡base modelçš„KLæ•£åº¦
         total_kl = torch.tensor(0.0, device=self.device)
         for step_idx, base_prob in enumerate(base_probs):
-            if step_idx < response_logits.size(1):  # ½T«O¤£¶W¹Lresponseªø«×
+            if step_idx < response_logits.size(1):  # ç¢ºä¿ä¸è¶…éresponseé•·åº¦
                 step_kl = self.compute_stepwise_kl(
                     response_logits[:, step_idx], 
                     base_prob
@@ -195,7 +196,7 @@ class SingleStepPPOTrainer:
                 total_kl += step_kl.mean()
         avg_kl = total_kl / len(base_probs)
         
-        # ¦pªGKL´²«×¤Ó¤j¡A¼W¥[Ãg»@
+        # å¦‚æœKLæ•£åº¦å¤ªå¤§ï¼Œå¢åŠ æ‡²ç½°
         kl_loss = self.kl_coef * torch.max(
             avg_kl - self.max_kl,
             torch.tensor(0.0, device=self.device)
@@ -210,10 +211,10 @@ class SingleStepPPOTrainer:
         surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * reward_tensor
         policy_loss = -torch.min(surr1, surr2)
 
-        # ­pºâæi·l¥¢
+        # è¨ˆç®—ç†µæå¤±
         entropy_loss = -self.entropy_coef * entropy
         
-        # Á`·l¥¢¡]¥[¤JKL·l¥¢¡^
+        # ç¸½æå¤±ï¼ˆåŠ å…¥KLæå¤±ï¼‰
         total_loss = policy_loss + entropy_loss + kl_loss # + point_loss
         
         metrics = {
@@ -234,16 +235,16 @@ class SingleStepPPOTrainer:
         messages: List[Dict[str, str]],
         temperature: float = 1.0
     ) -> Dict[str, float]:
-        """°õ¦æ³æ­ÓPPO¨BÆJ"""
-        # 1. ¥Í¦¨¦^À³
+        """åŸ·è¡Œå–®å€‹PPOæ­¥é©Ÿ"""
+        # 1. ç”Ÿæˆå›æ‡‰
         policy_response, old_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs = self.get_response(messages=messages, temperature=temperature)
 
-        # 2. ­pºâ¼úÀy
+        # 2. è¨ˆç®—çå‹µ
         reward = self.compute_reward(context, policy_response)
         print('policy_reward', reward)
         # print('reference_reward', self.compute_reward(context, reference_response))
         
-        # 3. ­pºâ·l¥¢
+        # 3. è¨ˆç®—æå¤±
         loss, new_log_prob, metrics = self.compute_policy_loss(
             messages, 
             policy_response, 
@@ -253,20 +254,20 @@ class SingleStepPPOTrainer:
         )
         self.policy.train()
         
-        # 4. Àu¤Æ¨BÆJ
+        # 4. å„ªåŒ–æ­¥é©Ÿ
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.policy.prefix_embeddings, self.max_grad_norm)
         self.optimizer.step()
         
-        # 5. §ó·s²Î­p
+        # 5. æ›´æ–°çµ±è¨ˆ
         self.training_stats['steps'] += 1
         self.training_stats['total_reward'] += reward
         self.training_stats['avg_reward'] = self.training_stats['total_reward'] / self.training_stats['steps']
         self.training_stats['total_kl'] += metrics['avg_kl']
         self.training_stats['avg_kl'] = self.training_stats['total_kl'] / self.training_stats['steps']
         
-        # 6. ªğ¦^¦¹¨BÆJªº§¹¾ã«H®§
+        # 6. è¿”å›æ­¤æ­¥é©Ÿçš„å®Œæ•´ä¿¡æ¯
         step_info = {
             # 'response': policy_response,
             'reward': reward,
@@ -278,7 +279,34 @@ class SingleStepPPOTrainer:
         
         return step_info
     
+    @classmethod
+    def from_config(cls, 
+        cfg, 
+        policy_model: PrefixTuningPolicyModel,
+        reward_model: ComparativeRewardModel,
+    ):
+        device = str(cfg['task'].get("device"))
 
+        trainer_cfg = cfg['task']
+        learning_rate = float(trainer_cfg.get("learning_rate"))
+        clip_epsilon = float(trainer_cfg.get("clip_epsilon"))
+        entropy_coef = float(trainer_cfg.get("entropy_coef"))
+        kl_coef = float(trainer_cfg.get("kl_coef"))
+        max_grad_norm = float(trainer_cfg.get("max_grad_norm"))
+        max_kl = float(trainer_cfg.get("max_kl"))
+
+        model = cls(
+            policy_model=policy_model,
+            reward_model=reward_model,
+            learning_rate=learning_rate,
+            clip_epsilon=clip_epsilon,
+            entropy_coef=entropy_coef,
+            kl_coef=kl_coef,
+            max_grad_norm=max_grad_norm,
+            max_kl=max_kl,
+            device=device,
+        )
+        return model
 
 
 
