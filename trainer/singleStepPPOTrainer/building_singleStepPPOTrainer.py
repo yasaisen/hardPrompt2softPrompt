@@ -2,7 +2,7 @@
  Copyright (c) 2025, yasaisen.
  All rights reserved.
 
- last modified in 2503252044
+ last modified in 2503261610
 """
 
 import torch
@@ -17,20 +17,23 @@ from ...models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 
 
 class SingleStepPPOTrainer:
-    def __init__(
-        self,
+    def __init__(self,
         policy_model: PrefixTuningPolicyModel,
         reward_model: ComparativeRewardModel,
         device: str = "cuda",
-        # PPO超參數
-        learning_rate: float = 1e-5,
         clip_epsilon: float = 0.2,
         entropy_coef: float = 0.01,
-        kl_coef: float = 0.1,  # KL散度係數
+        kl_coef: float = 0.1, 
         max_grad_norm: float = 1.0,
-        max_kl: float = 0.2,  # KL散度的最大閾值
+        max_kl: float = 0.2, 
         max_new_tokens: int = 50,
         temperature: float = 1.0,
+        learning_rate: float = 1e-5,
+        weight_decay: float = 1e-4, 
+        max_lr: float = 1e-3, 
+        steps: int = 30, 
+        pct_start: float = 0.2, 
+        anneal_strategy: str = 'cos', 
     ):
         self.state_name = 'SingleStepPPOTrainer'
         self.device = device
@@ -39,11 +42,7 @@ class SingleStepPPOTrainer:
 
         self.policy = policy_model.to(self.device)
         self.reward_model = reward_model.to(self.device)
-        
-        # 只優化policy model中的prefix參數
-        self.optimizer = optim.Adam([self.policy.prefix_embeddings], lr=learning_rate)
-        
-        # 保存超參數
+
         self.clip_epsilon = clip_epsilon
         self.entropy_coef = entropy_coef
         self.kl_coef = kl_coef
@@ -51,7 +50,28 @@ class SingleStepPPOTrainer:
         self.max_grad_norm = max_grad_norm
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
+
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.max_lr = max_lr
+        self.steps = steps
+        self.pct_start = pct_start
+        self.anneal_strategy = anneal_strategy
         
+        self.optimizer = optim.AdamW(
+            [self.policy.prefix_embeddings],
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay
+        )
+        self.scheduler = optim.lr_scheduler.OneCycleLR(
+            self.optimizer,
+            max_lr=self.max_lr,
+            epochs=1,
+            steps_per_epoch=self.steps,
+            pct_start=self.pct_start,
+            anneal_strategy=self.anneal_strategy
+        )
+
         # 追蹤訓練統計
         self.training_stats = {
             'steps': 0,
@@ -238,6 +258,7 @@ class SingleStepPPOTrainer:
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.policy.prefix_embeddings, self.max_grad_norm)
         self.optimizer.step()
+        self.scheduler.step()
         
         # 5. 更新統計
         self.training_stats['steps'] += 1
@@ -267,7 +288,6 @@ class SingleStepPPOTrainer:
         device = str(cfg['task'].get("device"))
 
         trainer_cfg = cfg['task']
-        learning_rate = float(trainer_cfg.get("learning_rate"))
         clip_epsilon = float(trainer_cfg.get("clip_epsilon"))
         entropy_coef = float(trainer_cfg.get("entropy_coef"))
         kl_coef = float(trainer_cfg.get("kl_coef"))
@@ -276,10 +296,16 @@ class SingleStepPPOTrainer:
         max_new_tokens = int(trainer_cfg.get("max_new_tokens"))
         temperature = float(trainer_cfg.get("temperature"))
 
+        learning_rate = float(trainer_cfg.get("learning_rate"))
+        weight_decay = float(trainer_cfg.get("weight_decay"))
+        max_lr = float(trainer_cfg.get("max_lr"))
+        steps = int(trainer_cfg.get("steps"))
+        pct_start = float(trainer_cfg.get("pct_start"))
+        anneal_strategy = str(trainer_cfg.get("anneal_strategy"))
+
         model = cls(
             policy_model=policy_model,
             reward_model=reward_model,
-            learning_rate=learning_rate,
             clip_epsilon=clip_epsilon,
             entropy_coef=entropy_coef,
             kl_coef=kl_coef,
@@ -287,9 +313,17 @@ class SingleStepPPOTrainer:
             max_kl=max_kl,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
+            learning_rate=learning_rate,
+            weight_decay=weight_decay, 
+            max_lr=max_lr, 
+            steps=steps, 
+            pct_start=pct_start, 
+            anneal_strategy=anneal_strategy, 
             device=device,
         )
         return model
+    
+
 
 
 
