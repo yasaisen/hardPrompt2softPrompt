@@ -82,11 +82,8 @@ class PrefixTuningPolicyModel(nn.Module):
         self.to(self.device) # 
         log_print(self.state_name, f"...Done\n")
 
-    # ------------------------------------------------------------------
     # Generation: uses in "prefix mode" to do token-by-token sampling.
-    # ------------------------------------------------------------------
-    def generate_response(
-        self, 
+    def generate_response(self, 
         messages_ids, 
         max_new_tokens: int = 50, 
         use_prefix: bool = True,
@@ -121,8 +118,7 @@ class PrefixTuningPolicyModel(nn.Module):
         
         return response, sum_logprob, probs_list
 
-    def full_forward(
-        self, 
+    def full_forward(self, 
         messages_ids, 
         response_ids, 
         use_prefix: bool,
@@ -154,8 +150,7 @@ class PrefixTuningPolicyModel(nn.Module):
 
         return response_logits, new_log_prob, entropy
 
-    def forward(
-        self,
+    def forward(self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True
@@ -257,7 +252,10 @@ class PrefixTuningPolicyModel(nn.Module):
         
         return logits
 
-    def truncate_from_beginning(self, chat, only_str=False):
+    def truncate_from_beginning(self, 
+            chat, 
+            only_str=False
+        ):
 
         if only_str:
             chat = [{'role': 'assistant', 'content': chat}]

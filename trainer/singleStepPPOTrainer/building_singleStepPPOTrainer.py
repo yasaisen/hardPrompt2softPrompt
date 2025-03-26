@@ -72,20 +72,20 @@ class SingleStepPPOTrainer:
             anneal_strategy=self.anneal_strategy
         )
 
-        # 追蹤訓練統計
         self.training_stats = {
             'steps': 0,
-            'total_reward': 0,
-            'avg_reward': 0,
-            'avg_kl': 0,
-            'total_kl': 0
+            'total_policy_reward': 0,
+            'total_reference_reward': 0,
+            'total_step_kl': 0,
+            'avg_policy_reward': 0,
+            'avg_reference_reward': 0,
+            'avg_step_kl': 0
         }
-
         log_print(self.state_name, f"...Done\n")
 
     def get_response(self,
         messages: List[Dict[str, str]],
-    ) -> Tuple[str, float]:
+    ):
         messages_ids = self.policy.truncate_from_beginning(messages)
         print('================================================got context')
         print(self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
@@ -105,16 +105,6 @@ class SingleStepPPOTrainer:
             temperature=self.temperature
         )
 
-        # generate_ids = self.policy.base_model.generate(
-        #     messages_ids, 
-        #     max_new_tokens=self.max_new_tokens,
-        #     temperature=self.temperature
-        # )
-        # generate_response = self.policy.tokenizer.decode(generate_ids.tolist()[0][len(messages_ids.tolist()[0]):], skip_special_tokens=False)
-        # reference_response, reference_log_prob, reference_probs = None, None, None
-
-        # print('================================================generate full')
-        # print(generate_response)
         print('================================================reference_response')
         print(reference_response)
         print(reference_log_prob)
@@ -125,13 +115,16 @@ class SingleStepPPOTrainer:
 
         return policy_response, policy_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs
 
-    def compute_reward(self, context: str, response: str) -> float:
+    def compute_reward(self, 
+        context: str, 
+        response: str
+    ) -> float:
         context_ids = self.reward_model.truncate_from_beginning(context)
         response_ids = self.reward_model.truncate_from_beginning(response)
-        
+
         context_mask = torch.ones_like(context_ids)
         response_mask = torch.ones_like(response_ids)
-        
+
         with torch.no_grad():
             reward = self.reward_model.get_reward(
                 context_ids,
@@ -139,11 +132,9 @@ class SingleStepPPOTrainer:
                 response_ids,
                 response_mask
             )
-        
         return reward.item()
 
-    def compute_stepwise_kl(
-        self, 
+    def compute_stepwise_kl(self, 
         policy_logits: torch.Tensor, 
         reference_logits: torch.Tensor
     ) -> torch.Tensor:
@@ -152,29 +143,35 @@ class SingleStepPPOTrainer:
 
         policy_probs = F.softmax(policy_logits, dim=-1)
         reference_probs = F.softmax(reference_logits, dim=-1)
-        
         log_policy_probs = F.log_softmax(policy_logits, dim=-1)
         
         # KL(P||Q) = Σ P(x) * log(P(x)/Q(x))
         kl_divergence = policy_probs * (
             log_policy_probs - torch.log(reference_probs + 1e-10)
         )
-        
         kl_divergence = kl_divergence.sum(dim=-1)
         return kl_divergence
 
     def compute_policy_loss(self,
-        messages,
-        response,
-        old_log_prob: float,
-        reward: float
-    ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, float]]:
+        context: str,
+        messages: List[Dict[str, str]],
+    ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        
+        policy_response, policy_old_log_prob, _, reference_response, _, _ = self.get_response(
+            messages=messages
+        )
+        policy_reward = self.compute_reward(context, policy_response)
+        reference_reward = self.compute_reward(context, reference_response)
+
+        print('policy_reward', policy_reward)
+        print('reference_reward', reference_reward)
 
         messages_ids = self.policy.truncate_from_beginning(messages)
-        response_ids = self.policy.truncate_from_beginning(response, only_str=True)
+        response_ids = self.policy.truncate_from_beginning(policy_response, only_str=True)
+
         with torch.no_grad():
             reference_response_logits, _, _ = self.policy.full_forward(messages_ids, response_ids, use_prefix=False)
-        policy_response_logits, new_log_prob, entropy = self.policy.full_forward(messages_ids, response_ids, use_prefix=True)
+        policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(messages_ids, response_ids, use_prefix=True)
 
         ##############################################################
         
@@ -188,7 +185,6 @@ class SingleStepPPOTrainer:
         # # print(point_loss)
         # print('================================================')
 
-        # 計算與base model的KL散度
         total_kl = torch.tensor(0.0, device=self.device)
         for step_idx in range(response_ids.shape[1]):
             step_kl = self.compute_stepwise_kl(
@@ -198,86 +194,76 @@ class SingleStepPPOTrainer:
             total_kl += step_kl.mean()
         avg_kl = total_kl / int(response_ids.shape[1])
 
-        # 如果KL散度太大，增加懲罰
         kl_loss = self.kl_coef * torch.max(
             avg_kl - self.max_kl,
             torch.tensor(0.0, device=self.device)
         )
 
         ### calculate PPO ###
-        ratio = torch.exp(new_log_prob - old_log_prob)
-        reward_tensor = torch.tensor(reward, device=self.device)
+        ratio = torch.exp(policy_new_log_prob - policy_old_log_prob)
+        reward_tensor = torch.tensor(policy_reward, device=self.device)
 
         surr1 = ratio * reward_tensor
         surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * reward_tensor
         policy_loss = -torch.min(surr1, surr2)
 
-        # 計算熵損失
         entropy_loss = -self.entropy_coef * entropy
         
-        # 總損失（加入KL損失）
-        total_loss = policy_loss + entropy_loss + kl_loss # + point_loss
-        
+        total_loss = policy_loss + entropy_loss + kl_loss
+
+        self.training_stats['steps'] += 1
         metrics = {
-            'policy_loss': policy_loss.item(),
-            'entropy_loss': entropy_loss.item(),
-            'kl_loss': kl_loss.item(),
-            'avg_kl': avg_kl.item(),
-            'total_loss': total_loss.item(),
+            'step': self.training_stats['steps'],
+
+            'policy_reward': policy_reward,
+            'reference_reward': reference_reward,
+
+            'old_log_prob': policy_old_log_prob,
+            'new_log_prob': policy_new_log_prob.item(),
             'ratio': ratio.item(),
-            'reward': reward
+            'step_avg_kl': avg_kl.item(),
+
+            'policy_loss': policy_loss.item(),
+            'kl_loss': kl_loss.item(),
+            'entropy_loss': entropy_loss.item(),
+            'total_loss': total_loss.item(),
         }
-        
-        return total_loss, new_log_prob, metrics
+        self.training_stats['total_policy_reward'] += policy_reward
+        self.training_stats['total_reference_reward'] += reference_reward
+        self.training_stats['total_step_kl'] += avg_kl.item()
 
-    def step(
-        self,
-        context: str,
-        messages: List[Dict[str, str]],
+        self.training_stats['avg_policy_reward'] = self.training_stats['total_policy_reward'] / self.training_stats['steps']
+        self.training_stats['avg_reference_reward'] = self.training_stats['total_reference_reward'] / self.training_stats['steps']
+        self.training_stats['avg_step_kl'] = self.training_stats['total_step_kl'] / self.training_stats['steps']
+        metrics['avg_policy_reward'] = self.training_stats['avg_policy_reward']
+        metrics['avg_reference_reward'] = self.training_stats['avg_reference_reward']
+        metrics['avg_step_kl'] = self.training_stats['avg_step_kl']
+
+        metrics['policy_response'] = policy_response
+        metrics['reference_response'] = reference_response
+
+        return total_loss, metrics
+
+    def step(self,
+        sample: Dict[str, str]
     ) -> Dict[str, float]:
-        """執行單個PPO步驟"""
-        # 1. 生成回應
-        policy_response, old_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs = self.get_response(messages=messages)
 
-        # 2. 計算獎勵
-        reward = self.compute_reward(context, policy_response)
-        print('policy_reward', reward)
-        print('reference_reward', self.compute_reward(context, reference_response))
+        context = sample["context"]
+        messages = sample["messages"]
         
-        # 3. 計算損失
-        loss, new_log_prob, metrics = self.compute_policy_loss(
+        loss, metrics = self.compute_policy_loss(
+            context=context,
             messages=messages, 
-            response=policy_response, 
-            old_log_prob=old_log_prob, 
-            reward=reward
         )
         self.policy.train()
         
-        # 4. 優化步驟
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.policy.prefix_embeddings, self.max_grad_norm)
         self.optimizer.step()
         self.scheduler.step()
         
-        # 5. 更新統計
-        self.training_stats['steps'] += 1
-        self.training_stats['total_reward'] += reward
-        self.training_stats['avg_reward'] = self.training_stats['total_reward'] / self.training_stats['steps']
-        self.training_stats['total_kl'] += metrics['avg_kl']
-        self.training_stats['avg_kl'] = self.training_stats['total_kl'] / self.training_stats['steps']
-        
-        # 6. 返回此步驟的完整信息
-        step_info = {
-            # 'response': policy_response,
-            'reward': reward,
-            'old_log_prob': old_log_prob,
-            'new_log_prob': new_log_prob.item(),
-            **metrics,
-            **self.training_stats
-        }
-        
-        return step_info
+        return metrics
     
     @classmethod
     def from_config(cls, 
@@ -306,6 +292,7 @@ class SingleStepPPOTrainer:
         model = cls(
             policy_model=policy_model,
             reward_model=reward_model,
+
             clip_epsilon=clip_epsilon,
             entropy_coef=entropy_coef,
             kl_coef=kl_coef,
@@ -313,12 +300,14 @@ class SingleStepPPOTrainer:
             max_kl=max_kl,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
+
             learning_rate=learning_rate,
             weight_decay=weight_decay, 
             max_lr=max_lr, 
             steps=steps, 
             pct_start=pct_start, 
             anneal_strategy=anneal_strategy, 
+
             device=device,
         )
         return model
