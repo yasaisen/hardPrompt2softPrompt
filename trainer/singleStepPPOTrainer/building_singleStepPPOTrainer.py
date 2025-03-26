@@ -175,7 +175,6 @@ class SingleStepPPOTrainer:
                 policy_response_logits[:, step_idx], 
                 reference_response_logits[:, step_idx]
             )
-            print('$$$$$$$$$$$', step_kl)
             total_kl += step_kl.mean()
         avg_kl = total_kl / int(response_ids.shape[1])
 
@@ -184,8 +183,6 @@ class SingleStepPPOTrainer:
             avg_kl - self.max_kl,
             torch.tensor(0.0, device=self.device)
         )
-
-        print('$$$$$$$$$$$', avg_kl, kl_loss)
 
         ### calculate PPO ###
         ratio = torch.exp(new_log_prob - old_log_prob)
