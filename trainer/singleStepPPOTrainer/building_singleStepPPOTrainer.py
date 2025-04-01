@@ -170,8 +170,8 @@ class SingleStepPPOTrainer:
         policy_reward = self.compute_reward(context, policy_response)
         reference_reward = self.compute_reward(context, reference_response)
 
-        print('policy_reward', policy_reward)
-        print('reference_reward', reference_reward)
+        # print('policy_reward', policy_reward)
+        # print('reference_reward', reference_reward)
 
         messages_ids = self.policy.truncate_from_beginning(messages)
         response_ids = self.policy.truncate_from_beginning(policy_response, only_str=True)
