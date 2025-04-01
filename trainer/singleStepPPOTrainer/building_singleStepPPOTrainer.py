@@ -31,7 +31,8 @@ class SingleStepPPOTrainer:
         learning_rate: float = 1e-5,
         weight_decay: float = 1e-4, 
         max_lr: float = 1e-3, 
-        steps: int = 30, 
+        num_epoch: int = 30, 
+        steps_per_epoch: int = 30, 
         pct_start: float = 0.2, 
         anneal_strategy: str = 'cos', 
     ):
@@ -54,7 +55,8 @@ class SingleStepPPOTrainer:
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.max_lr = max_lr
-        self.steps = steps
+        self.num_epoch = num_epoch
+        self.steps_per_epoch = steps_per_epoch
         self.pct_start = pct_start
         self.anneal_strategy = anneal_strategy
         
@@ -66,8 +68,8 @@ class SingleStepPPOTrainer:
         self.scheduler = optim.lr_scheduler.OneCycleLR(
             self.optimizer,
             max_lr=self.max_lr,
-            epochs=1,
-            steps_per_epoch=self.steps,
+            epochs=self.num_epoch,
+            steps_per_epoch=self.steps_per_epoch,
             pct_start=self.pct_start,
             anneal_strategy=self.anneal_strategy
         )
@@ -277,6 +279,7 @@ class SingleStepPPOTrainer:
         cfg, 
         policy_model: PrefixTuningPolicyModel,
         reward_model: ComparativeRewardModel,
+        steps_per_epoch: int,
     ):
         device = str(cfg['task'].get("device"))
 
@@ -292,7 +295,7 @@ class SingleStepPPOTrainer:
         learning_rate = float(trainer_cfg.get("learning_rate"))
         weight_decay = float(trainer_cfg.get("weight_decay"))
         max_lr = float(trainer_cfg.get("max_lr"))
-        steps = int(trainer_cfg.get("steps"))
+        num_epoch = int(trainer_cfg.get("num_epoch"))
         pct_start = float(trainer_cfg.get("pct_start"))
         anneal_strategy = str(trainer_cfg.get("anneal_strategy"))
 
@@ -311,7 +314,8 @@ class SingleStepPPOTrainer:
             learning_rate=learning_rate,
             weight_decay=weight_decay, 
             max_lr=max_lr, 
-            steps=steps, 
+            num_epoch=num_epoch, 
+            steps_per_epoch=steps_per_epoch, 
             pct_start=pct_start, 
             anneal_strategy=anneal_strategy, 
 
