@@ -84,12 +84,13 @@ class SingleStepPPOTrainer:
         log_print(self.state_name, f"...Done\n")
 
     def get_response(self,
-        messages: List[Dict[str, str]],
+        messages_ids,
+        print_response: bool,
     ):
-        messages_ids = self.policy.truncate_from_beginning(messages)
-        print('================================================got context')
-        print(self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
-        print('================================================got context')
+        if print_response:
+            print('================================================got context')
+            print(self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
+            print('================================================got context')
 
         reference_response, reference_log_prob, reference_probs = self.policy.generate_response(
             messages_ids,
@@ -105,13 +106,14 @@ class SingleStepPPOTrainer:
             temperature=self.temperature
         )
 
-        print('================================================reference_response')
-        print(reference_response)
-        print(reference_log_prob)
-        print('================================================policy_response')
-        print(policy_response)
-        print(policy_log_prob)
-        print('================================================end')
+        if print_response:
+            print('================================================reference_response')
+            print(reference_response)
+            print(reference_log_prob)
+            print('================================================policy_response')
+            print(policy_response)
+            print(policy_log_prob)
+            print('================================================end')
 
         return policy_response, policy_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs
 
@@ -155,10 +157,13 @@ class SingleStepPPOTrainer:
     def compute_policy_loss(self,
         context: str,
         messages: List[Dict[str, str]],
+        output_response: bool,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         
+        messages_ids = self.policy.truncate_from_beginning(messages)
         policy_response, policy_old_log_prob, _, reference_response, _, _ = self.get_response(
-            messages=messages
+            messages_ids=messages_ids, 
+            print_response=False,
         )
         policy_reward = self.compute_reward(context, policy_response)
         reference_reward = self.compute_reward(context, reference_response)
@@ -239,8 +244,10 @@ class SingleStepPPOTrainer:
         metrics['avg_reference_reward'] = self.training_stats['avg_reference_reward']
         metrics['avg_step_kl'] = self.training_stats['avg_step_kl']
 
-        metrics['policy_response'] = policy_response
-        metrics['reference_response'] = reference_response
+        if output_response:
+            metrics['context_messages'] = self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False)
+            metrics['policy_response'] = policy_response
+            metrics['reference_response'] = reference_response
 
         return total_loss, metrics
 
@@ -264,7 +271,7 @@ class SingleStepPPOTrainer:
         self.scheduler.step()
         
         return metrics
-    
+
     @classmethod
     def from_config(cls, 
         cfg, 
