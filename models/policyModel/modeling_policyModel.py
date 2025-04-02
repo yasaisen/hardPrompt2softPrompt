@@ -120,7 +120,7 @@ class PrefixTuningPolicyModel(nn.Module):
     ):
         ### get full response logits from forward pass response to policy model ###
         combined_ids = torch.cat([messages_ids[:, :-3], response_ids[:, 7:-3]], dim=1)
-        highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
+        # highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
 
         logits = self(
             input_ids=combined_ids, 
@@ -169,10 +169,8 @@ class PrefixTuningPolicyModel(nn.Module):
 
              # torch.Size([1, 4]) torch.Size([1, 39]) torch.Size([1, 2]) -> torch.Size([1, 45])
             formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
-            highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, input_ids[:, 7:]], dim=1).tolist()[0], skip_special_tokens=False))
-            if debug:
-                raise ValueError
-            
+            # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, input_ids[:, 7:]], dim=1).tolist()[0], skip_special_tokens=False))
+
              # torch.Size([1, 45]) -> torch.Size([1, 45, 3072])
             formaled_inputs_embeds = self.base_model.model.embed_tokens(formaled_input_ids)
              # torch.Size([1, 45, 3072]) -> torch.Size([1, 45, 3072])
