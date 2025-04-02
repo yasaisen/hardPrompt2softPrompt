@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 
-from ...common.utils import log_print, get_trainable_params, highlight
+from ...common.utils import log_print, get_trainable_params, highlight, highlight_show
 
 
 class PrefixTuningPolicyModel(nn.Module):
@@ -121,7 +121,7 @@ class PrefixTuningPolicyModel(nn.Module):
         ### get full response logits from forward pass response to policy model ###
 
         combined_ids = torch.cat([messages_ids[:, 7:-3], response_ids[:, 7:-3]], dim=1)
-        # highlight_show('input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
+        highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
 
         logits = self(combined_ids, use_prefix=use_prefix)
         response_logits = logits[:, -response_ids.shape[1]:] # [1, seq_len + 1, 256000]
@@ -145,7 +145,7 @@ class PrefixTuningPolicyModel(nn.Module):
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True
     ):
-        # highlight_show('input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
+        highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
 
         batch_size, seq_len = input_ids.shape
         input_ids = input_ids.to(self.device)
