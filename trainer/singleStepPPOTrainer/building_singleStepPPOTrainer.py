@@ -89,7 +89,8 @@ class SingleStepPPOTrainer:
         output_probs: bool = False,
         print_response: bool = False,
     ):
-        max_new_tokens = max(self.max_token_len - int(messages_ids.shape[1]), 0)
+        messages_token_len = int(messages_ids.shape[1]) - 7 + 6 + int(self.policy.prefix_ids.shape[1])
+        max_new_tokens = max(self.max_token_len - messages_token_len, 0)
         if print_response:
             highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
 
