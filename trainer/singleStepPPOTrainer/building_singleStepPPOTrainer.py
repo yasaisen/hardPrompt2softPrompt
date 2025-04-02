@@ -2,7 +2,7 @@
  Copyright (c) 2025, yasaisen(clover).
  All rights reserved.
 
- last modified in 2504021929
+ last modified in 2504030040
 """
 
 import torch
@@ -25,7 +25,7 @@ class SingleStepPPOTrainer:
         kl_coef: float = 0.1, 
         max_grad_norm: float = 1.0,
         max_kl: float = 0.2, 
-        max_new_tokens: int = 50,
+        max_token_len: int = 50,
         temperature: float = 1.0,
         learning_rate: float = 1e-5,
         weight_decay: float = 1e-4, 
@@ -48,7 +48,7 @@ class SingleStepPPOTrainer:
         self.kl_coef = kl_coef
         self.max_kl = max_kl
         self.max_grad_norm = max_grad_norm
-        self.max_new_tokens = max_new_tokens
+        self.max_token_len = max_token_len
         self.temperature = temperature
 
         self.learning_rate = learning_rate
@@ -89,19 +89,19 @@ class SingleStepPPOTrainer:
         output_probs: bool = False,
         print_response: bool = False,
     ):
-        
+        max_new_tokens = max(self.max_token_len - int(messages_ids.shape[1]), 0)
         if print_response:
             highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
 
         reference_response, reference_log_prob, reference_probs = self.policy.generate_response(
             messages_ids,
-            max_new_tokens=self.max_new_tokens,
+            max_new_tokens=max_new_tokens,
             use_prefix=False,
             temperature=self.temperature
         )
         policy_response, policy_log_prob, policy_probs = self.policy.generate_response(
             messages_ids,
-            max_new_tokens=self.max_new_tokens,
+            max_new_tokens=max_new_tokens,
             use_prefix=True,
             temperature=self.temperature
         )
@@ -286,7 +286,7 @@ class SingleStepPPOTrainer:
         kl_coef = float(trainer_cfg.get("kl_coef"))
         max_grad_norm = float(trainer_cfg.get("max_grad_norm"))
         max_kl = float(trainer_cfg.get("max_kl"))
-        max_new_tokens = int(trainer_cfg.get("max_new_tokens"))
+        max_token_len = int(trainer_cfg.get("max_token_len"))
         temperature = float(trainer_cfg.get("temperature"))
 
         learning_rate = float(trainer_cfg.get("learning_rate"))
@@ -305,7 +305,7 @@ class SingleStepPPOTrainer:
             kl_coef=kl_coef,
             max_grad_norm=max_grad_norm,
             max_kl=max_kl,
-            max_new_tokens=max_new_tokens,
+            max_token_len=max_token_len,
             temperature=temperature,
 
             learning_rate=learning_rate,
@@ -331,4 +331,3 @@ class SingleStepPPOTrainer:
 
 
 
-    
