@@ -119,8 +119,7 @@ class PrefixTuningPolicyModel(nn.Module):
         temperature: float = 1.0
     ):
         ### get full response logits from forward pass response to policy model ###
-
-        combined_ids = torch.cat([messages_ids[:, 7:-3], response_ids[:, 7:-3]], dim=1)
+        combined_ids = torch.cat([messages_ids[:, :-3], response_ids[:, 7:-3]], dim=1)
         highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
 
         logits = self(
