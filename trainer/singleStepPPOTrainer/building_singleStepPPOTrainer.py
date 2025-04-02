@@ -99,7 +99,7 @@ class SingleStepPPOTrainer:
             use_prefix=False,
             temperature=self.temperature
         )
-        log_print(self.state_name, f"[{highlight()}] max_new_tokens: {max_new_tokens}")
+        log_print(self.state_name, f"[{highlight()}] max_token_len: {int(messages_ids.shape[1])} / {max_new_tokens}")
 
         policy_response, policy_log_prob, policy_probs = self.policy.generate_response(
             messages_ids,
@@ -107,7 +107,7 @@ class SingleStepPPOTrainer:
             use_prefix=True,
             temperature=self.temperature
         )
-        log_print(self.state_name, f"[{highlight()}] max_new_tokens: {max_new_tokens}")
+        log_print(self.state_name, f"[{highlight()}] max_token_len: {int(messages_ids.shape[1])} / {max_new_tokens}")
 
         if print_response:
             highlight_show('reference_response', reference_response)

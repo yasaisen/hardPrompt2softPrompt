@@ -179,7 +179,7 @@ class PrefixTuningPolicyModel(nn.Module):
             prefix_mask = torch.ones(batch_size, template_start_len + self.prefix_length + template_end_len - 7, dtype=torch.long, device=input_ids.device)
             extended_mask = torch.cat([prefix_mask, attention_mask], dim=1)
 
-            log_print(self.state_name, f"[{highlight()}] {use_prefix}_{inputs_embeds.shape[1]}")
+            log_print(self.state_name, f"[{highlight()}] {use_prefix} / {inputs_embeds.shape[1]}")
             transformer_outputs = self.base_model.model(
                 inputs_embeds=inputs_embeds,
                 attention_mask=extended_mask,
@@ -204,7 +204,7 @@ class PrefixTuningPolicyModel(nn.Module):
             prefix_mask = torch.ones(batch_size, template_start_len + self.prefix_length + template_end_len - 7, dtype=torch.long, device=input_ids.device)
             extended_mask = torch.cat([prefix_mask, attention_mask], dim=1)
             
-            log_print(self.state_name, f"[{highlight()}] {use_prefix}_{inputs_embeds.shape[1]}")
+            log_print(self.state_name, f"[{highlight()}] {use_prefix} / {inputs_embeds.shape[1]}")
             transformer_outputs = self.base_model.model(
                 inputs_embeds=inputs_embeds,
                 attention_mask=extended_mask,
