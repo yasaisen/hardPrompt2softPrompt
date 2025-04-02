@@ -170,7 +170,6 @@ class PrefixTuningPolicyModel(nn.Module):
             attention_mask = torch.ones(batch_size, seq_len, dtype=torch.long, device=input_ids.device)
         
         if not use_prefix:
-
              # torch.Size([1, 4]) torch.Size([1, 39]) torch.Size([1, 2]) -> torch.Size([1, 45])
             formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
             # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, input_ids[:, 7:]], dim=1).tolist()[0], skip_special_tokens=False))
