@@ -86,7 +86,9 @@ def save_result(result, log_save_path):
     with open(log_save_path, "a") as f:
         f.write(f"{result}\n")
 
-def highlight(text):
+def highlight(
+    text: str = 'debug',
+):
     return f"\033[1;31;40m{text}\033[0m"
 
 def highlight_show(

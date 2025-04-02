@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from typing import List, Tuple, Dict
 
-from ...common.utils import log_print, highlight_show
+from ...common.utils import log_print, highlight_show, highlight
 from ...models.rewardModel.modeling_rewardModel import ComparativeRewardModel
 from ...models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 
@@ -99,21 +99,24 @@ class SingleStepPPOTrainer:
             use_prefix=False,
             temperature=self.temperature
         )
+        log_print(self.state_name, f"[{highlight()}] max_new_tokens: {max_new_tokens}")
+
         policy_response, policy_log_prob, policy_probs = self.policy.generate_response(
             messages_ids,
             max_new_tokens=max_new_tokens,
             use_prefix=True,
             temperature=self.temperature
         )
+        log_print(self.state_name, f"[{highlight()}] max_new_tokens: {max_new_tokens}")
 
         if print_response:
             highlight_show('reference_response', reference_response)
             highlight_show('policy_response', policy_response)
             
         if output_probs:
-            return policy_response, policy_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs
+            return policy_response, policy_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs, max_new_tokens
 
-        return policy_response, policy_log_prob, reference_response, reference_log_prob
+        return policy_response, policy_log_prob, reference_response, reference_log_prob, max_new_tokens
 
     def compute_reward(self, 
         context: str, 
@@ -164,7 +167,7 @@ class SingleStepPPOTrainer:
             chat_dict=messages, 
             is_response=False
         )
-        policy_response, policy_old_log_prob, reference_response, _ = self.get_response(
+        policy_response, policy_old_log_prob, reference_response, _, max_new_tokens = self.get_response(
             messages_ids=messages_ids, 
             output_probs=False,
             print_response=False,
@@ -239,6 +242,7 @@ class SingleStepPPOTrainer:
         self.training_stats['steps'] += 1
         metrics = {
             'step': self.training_stats['steps'],
+            'max_new_tokens': max_new_tokens,
 
             'policy_reward': policy_reward,
             'reference_reward': reference_reward,
