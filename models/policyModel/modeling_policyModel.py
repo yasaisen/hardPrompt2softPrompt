@@ -91,7 +91,11 @@ class PrefixTuningPolicyModel(nn.Module):
         for _ in range(max_new_tokens):
             input_ids = torch.cat([messages_ids, torch.tensor([generated_tokens], dtype=torch.long, device=self.device)], dim=1)
             with torch.no_grad():
-                logits = self(input_ids, use_prefix=use_prefix)
+                logits = self(
+                    input_ids=input_ids, 
+                    use_prefix=use_prefix,
+                    stage='decode',
+                )
 
             # greedy search
             next_token_logits = logits[0, -1, :] # torch.Size([1, 256000])
@@ -125,7 +129,7 @@ class PrefixTuningPolicyModel(nn.Module):
         logits = self(
             input_ids=combined_ids, 
             use_prefix=use_prefix,
-            debug=True
+            stage='prefill',
         )
         response_logits = logits[:, -response_ids.shape[1]:] # [1, seq_len + 1, 256000]
 
@@ -147,7 +151,7 @@ class PrefixTuningPolicyModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
-        debug: bool = False
+        stage: str = '',
     ):
         # highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
         batch_size, seq_len = input_ids.shape
@@ -183,7 +187,7 @@ class PrefixTuningPolicyModel(nn.Module):
             prefix_mask = torch.ones(batch_size, template_start_len + self.prefix_length + template_end_len - 7, dtype=torch.long, device=input_ids.device)
             extended_mask = torch.cat([prefix_mask, attention_mask], dim=1)
 
-            log_print(self.state_name, f"[{highlight()}] {use_prefix} / {inputs_embeds.shape[1]}")
+            log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
             transformer_outputs = self.base_model.model(
                 inputs_embeds=inputs_embeds,
                 attention_mask=extended_mask,
@@ -208,7 +212,7 @@ class PrefixTuningPolicyModel(nn.Module):
             prefix_mask = torch.ones(batch_size, template_start_len + self.prefix_length + template_end_len - 7, dtype=torch.long, device=input_ids.device)
             extended_mask = torch.cat([prefix_mask, attention_mask], dim=1)
             
-            log_print(self.state_name, f"[{highlight()}] {use_prefix} / {inputs_embeds.shape[1]}")
+            log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
             transformer_outputs = self.base_model.model(
                 inputs_embeds=inputs_embeds,
                 attention_mask=extended_mask,
