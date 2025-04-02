@@ -1,8 +1,8 @@
 """
- Copyright (c) 2025, yasaisen.
+ Copyright (c) 2025, yasaisen(clover).
  All rights reserved.
 
- last modified in 2503111925
+ last modified in 2504021929
 """
 
 import ast
@@ -86,6 +86,43 @@ def save_result(result, log_save_path):
     with open(log_save_path, "a") as f:
         f.write(f"{result}\n")
 
+def highlight(text):
+    return f"\033[1;31;40m{text}\033[0m"
+
+def highlight_show(
+        key: str, 
+        text: str,
+        bar: str = '=',
+    ):
+    print(f'[{key}]', bar * 43)
+    print(text)
+    print(f'[{key}]', bar * 43)
+    
+def calu_dict_avg(
+    local_metrics_list: List[Dict[str, float]], 
+    epoch_idx: int,
+    state: str, 
+    show: bool = False,
+    avoid_key_list: List[str] = [],
+) -> Dict[str, float]:
+    local_metrics = {}
+    for key in local_metrics_list[0]:
+        if key not in avoid_key_list:
+            local_metrics[key] = 0
+        
+    for single_dict in local_metrics_list:
+        for key in local_metrics:
+            local_metrics[key] += single_dict[key]
+
+    if show:
+        print('\n', f'[{state}_{str(epoch_idx)}_Results]', '=' * 43)
+        for key in local_metrics:
+            local_metrics[key] /=  len(local_metrics_list)
+            print(key, local_metrics[key])
+        print(f'[{state}_{str(epoch_idx)}_Results]', '=' * 43, '\n')
+
+    return local_metrics
+    
 
 
 
@@ -96,3 +133,5 @@ def save_result(result, log_save_path):
 
 
 
+
+    

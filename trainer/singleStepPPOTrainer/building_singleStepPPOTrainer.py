@@ -1,17 +1,16 @@
 """
- Copyright (c) 2025, yasaisen.
+ Copyright (c) 2025, yasaisen(clover).
  All rights reserved.
 
- last modified in 2503261610
+ last modified in 2504021929
 """
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from typing import List, Tuple, Dict
-import os
 
-from ...common.utils import log_print, get_trainable_params
+from ...common.utils import log_print, highlight_show
 from ...models.rewardModel.modeling_rewardModel import ComparativeRewardModel
 from ...models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 
@@ -86,13 +85,13 @@ class SingleStepPPOTrainer:
         log_print(self.state_name, f"...Done\n")
 
     def get_response(self,
-        messages_ids,
-        print_response: bool,
+        messages_ids: torch.Tensor, 
+        output_probs: bool = False,
+        print_response: bool = False,
     ):
+        
         if print_response:
-            print('================================================got context')
-            print(self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
-            print('================================================got context')
+            highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
 
         reference_response, reference_log_prob, reference_probs = self.policy.generate_response(
             messages_ids,
@@ -100,7 +99,6 @@ class SingleStepPPOTrainer:
             use_prefix=False,
             temperature=self.temperature
         )
-
         policy_response, policy_log_prob, policy_probs = self.policy.generate_response(
             messages_ids,
             max_new_tokens=self.max_new_tokens,
@@ -109,15 +107,13 @@ class SingleStepPPOTrainer:
         )
 
         if print_response:
-            print('================================================reference_response')
-            print(reference_response)
-            print(reference_log_prob)
-            print('================================================policy_response')
-            print(policy_response)
-            print(policy_log_prob)
-            print('================================================end')
+            highlight_show('reference_response', reference_response)
+            highlight_show('policy_response', policy_response)
+            
+        if output_probs:
+            return policy_response, policy_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs
 
-        return policy_response, policy_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs
+        return policy_response, policy_log_prob, reference_response, reference_log_prob
 
     def compute_reward(self, 
         context: str, 
@@ -129,6 +125,7 @@ class SingleStepPPOTrainer:
         context_mask = torch.ones_like(context_ids)
         response_mask = torch.ones_like(response_ids)
 
+        self.reward_model.eval()
         with torch.no_grad():
             reward = self.reward_model.get_reward(
                 context_ids,
@@ -158,45 +155,66 @@ class SingleStepPPOTrainer:
 
     def compute_policy_loss(self,
         context: str,
-        messages: List[Dict[str, str]],
-        output_response: bool,
+        messages: List[Dict[str, str]], 
+        valid: bool = False, 
+        output_response: bool = False, 
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         
-        messages_ids = self.policy.truncate_from_beginning(messages)
-        policy_response, policy_old_log_prob, _, reference_response, _, _ = self.get_response(
+        messages_ids = self.policy.chat_template_tokenizer(
+            chat_dict=messages, 
+            is_response=False
+        )
+        policy_response, policy_old_log_prob, reference_response, _ = self.get_response(
             messages_ids=messages_ids, 
+            output_probs=False,
             print_response=False,
         )
-        policy_reward = self.compute_reward(context, policy_response)
-        reference_reward = self.compute_reward(context, reference_response)
 
-        # print('policy_reward', policy_reward)
-        # print('reference_reward', reference_reward)
+        policy_reward = self.compute_reward(
+            context=context, 
+            response=policy_response
+        )
+        reference_reward = self.compute_reward(
+            context=context, 
+            response=reference_response
+        )
 
-        messages_ids = self.policy.truncate_from_beginning(messages)
-        response_ids = self.policy.truncate_from_beginning(policy_response, only_str=True)
+        response_ids = self.policy.chat_template_tokenizer(
+            chat_dict=policy_response, 
+            is_response=True
+        )
 
+        self.policy.eval()
         with torch.no_grad():
-            reference_response_logits, _, _ = self.policy.full_forward(messages_ids, response_ids, use_prefix=False)
-        policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(messages_ids, response_ids, use_prefix=True)
-
-        ##############################################################
-        
-        # print('================================================')
-        # embeddings = self.policy.base_model.lm_head(self.policy.prefix_embeddings)
-        # print(embeddings.shape)
-        # next_token_id = torch.argmax(embeddings, dim=-1).to(torch.long)
-        # response = self.policy.tokenizer.decode(next_token_id, skip_special_tokens=True)
-        # print(response)
-        # # point_loss = torch.tensor(float(input('input(-3 - +3):')) / -6, device=self.device)
-        # # print(point_loss)
-        # print('================================================')
+            reference_response_logits, _, _ = self.policy.full_forward(
+                messages_ids=messages_ids, 
+                response_ids=response_ids, 
+                use_prefix=False,
+                temperature=self.temperature,
+            )
+        if valid:
+            self.policy.eval()
+            with torch.no_grad():
+                policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
+                    messages_ids=messages_ids, 
+                    response_ids=response_ids, 
+                    use_prefix=True,
+                    temperature=self.temperature,
+                )
+        else:
+            self.policy.train()
+            policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
+                messages_ids=messages_ids, 
+                response_ids=response_ids, 
+                use_prefix=True,
+                temperature=self.temperature,
+            )
 
         total_kl = torch.tensor(0.0, device=self.device)
         for step_idx in range(response_ids.shape[1]):
             step_kl = self.compute_stepwise_kl(
-                policy_response_logits[:, step_idx], 
-                reference_response_logits[:, step_idx]
+                policy_logits=policy_response_logits[:, step_idx], 
+                reference_logits=reference_response_logits[:, step_idx],
             )
             total_kl += step_kl.mean()
         avg_kl = total_kl / int(response_ids.shape[1])
@@ -252,27 +270,6 @@ class SingleStepPPOTrainer:
             metrics['reference_response'] = reference_response
 
         return total_loss, metrics
-
-    def step(self,
-        sample: Dict[str, str]
-    ) -> Dict[str, float]:
-
-        context = sample["context"]
-        messages = sample["messages"]
-        
-        loss, metrics = self.compute_policy_loss(
-            context=context,
-            messages=messages, 
-        )
-        self.policy.train()
-        
-        self.optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy.prefix_embeddings, self.max_grad_norm)
-        self.optimizer.step()
-        self.scheduler.step()
-        
-        return metrics
 
     @classmethod
     def from_config(cls, 
@@ -334,3 +331,4 @@ class SingleStepPPOTrainer:
 
 
 
+    

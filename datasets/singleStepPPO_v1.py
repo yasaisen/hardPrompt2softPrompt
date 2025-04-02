@@ -1,10 +1,11 @@
 """
- Copyright (c) 2025, yasaisen.
+ Copyright (c) 2025, yasaisen(clover).
  All rights reserved.
 
- last modified in 2503252044
+ last modified in 2504021929
 """
 
+from typing import List
 from torch.utils.data import Dataset, random_split
 import ast
 
@@ -13,7 +14,7 @@ from ..common.utils import log_print, load_data
 
 class singleStepPPO_v1_Dataset(Dataset):
     def __init__(self, 
-        data_path, 
+        data_path: str, 
         # split,
     ):
         self.state_name = 'singleStepPPO_v1_Dataset'
@@ -57,6 +58,25 @@ class singleStepPPO_v1_Dataset(Dataset):
 
         return train_dataset, val_dataset
     
+def get_loader(
+    dataset: Dataset, 
+    bsz: int,
+) -> List:
+    loader = []
+    for idx in range(int(len(dataset) / bsz) + 1):
+        if (idx + 1) * bsz <= len(dataset):
+            loader += [[dataset[i] for i in range(idx * bsz, (idx + 1) * bsz)]]
+        else:
+            loader += [[dataset[i] for i in range(idx * bsz, len(dataset))]]
+    return loader
+
+def get_loader_forTest(
+    dataset: Dataset, 
+    bsz: int = 0,
+) -> List:
+    loader = [[dataset[0]]]
+    return loader
+    
 
 
 
@@ -68,3 +88,4 @@ class singleStepPPO_v1_Dataset(Dataset):
 
 
 
+    
