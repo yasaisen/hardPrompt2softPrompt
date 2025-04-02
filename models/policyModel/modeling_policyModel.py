@@ -122,11 +122,11 @@ class PrefixTuningPolicyModel(nn.Module):
 
         combined_ids = torch.cat([messages_ids[:, 7:-3], response_ids[:, 7:-3]], dim=1)
         highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
+        raise ValueError
 
         logits = self(
             input_ids=combined_ids, 
             use_prefix=use_prefix,
-            debug=True,
         )
         response_logits = logits[:, -response_ids.shape[1]:] # [1, seq_len + 1, 256000]
 
@@ -148,10 +148,8 @@ class PrefixTuningPolicyModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
-        debug: bool = False,
     ):
-        if debug:
-            highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
+        highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
 
         batch_size, seq_len = input_ids.shape
         input_ids = input_ids.to(self.device)
