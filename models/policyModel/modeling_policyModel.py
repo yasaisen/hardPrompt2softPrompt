@@ -122,11 +122,11 @@ class PrefixTuningPolicyModel(nn.Module):
 
         combined_ids = torch.cat([messages_ids[:, 7:-3], response_ids[:, 7:-3]], dim=1)
         highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
-        raise ValueError
 
         logits = self(
             input_ids=combined_ids, 
             use_prefix=use_prefix,
+            debug=True
         )
         response_logits = logits[:, -response_ids.shape[1]:] # [1, seq_len + 1, 256000]
 
@@ -148,9 +148,9 @@ class PrefixTuningPolicyModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
+        debug: bool = False
     ):
-        highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
-
+        # highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
         batch_size, seq_len = input_ids.shape
         input_ids = input_ids.to(self.device)
         self.prefix_ids = self.prefix_ids.to(self.device)
@@ -170,7 +170,10 @@ class PrefixTuningPolicyModel(nn.Module):
 
              # torch.Size([1, 4]) torch.Size([1, 39]) torch.Size([1, 2]) -> torch.Size([1, 45])
             formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
-            # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, input_ids[:, 7:]], dim=1).tolist()[0], skip_special_tokens=False))
+            highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, input_ids[:, 7:]], dim=1).tolist()[0], skip_special_tokens=False))
+            if debug:
+                raise ValueError
+            
              # torch.Size([1, 45]) -> torch.Size([1, 45, 3072])
             formaled_inputs_embeds = self.base_model.model.embed_tokens(formaled_input_ids)
              # torch.Size([1, 45, 3072]) -> torch.Size([1, 45, 3072])
