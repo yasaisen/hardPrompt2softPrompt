@@ -2,10 +2,9 @@
  Copyright (c) 2025, yasaisen(clover).
  All rights reserved.
 
- last modified in 2504021929
+ last modified in 2504040315
 """
 
-import ast
 import json
 from typing import Dict, List
 from datetime import datetime
@@ -21,6 +20,80 @@ import os
 def log_print(state_name, text):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] [{state_name}] {text}")
 
+def checkpath(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+class ConfigHandler:
+    def __init__(self, 
+        cfg,
+        default_save_filename: str = 'best_model',
+    ):
+        self.state_name = 'ConfigHandler'
+        print()
+        log_print(self.state_name, f"Building...")
+
+        self.cfg = cfg
+        self.default_save_filename = default_save_filename
+
+        if cfg['task'].get("root_path") == "":
+            pwd = os.getcwd()
+            cfg['task']['root_path'] = pwd
+            log_print(self.state_name, f"Automatically set path on {pwd}")
+
+        log_print(self.state_name, f"Loaded config:")
+        pprint(self.cfg)
+
+        self.nowtime = datetime.now().strftime("%y%m%d%H%M")
+        self.save_path = os.path.join(self.cfg['task'].get("root_path"), self.cfg['task'].get("output_path"), self.nowtime)
+        checkpath(self.save_path)
+
+        self.log_save_path = os.path.join(self.save_path, self.nowtime + '_result.log')
+        with open(self.log_save_path, "w") as file:
+            # file.write(self.cfg + "\n")
+            yaml.safe_dump(self.cfg, file, default_flow_style=False)
+
+        log_print(self.state_name, f"Saved config to {self.log_save_path}")
+        log_print(self.state_name, f"...Done\n")
+
+    def save_result(self, 
+        result: Dict,
+    ):
+        with open(self.log_save_path, "a") as f:
+            f.write(f"{result}\n")
+
+        log_print(self.state_name, f"Saved result to {self.log_save_path}")
+
+    def save_weight(self, 
+        weight_dict: Dict, 
+        save_filename: str = None,
+    ):
+        if save_filename is None:
+            save_filename = self.default_save_filename
+        file_save_path = os.path.join(self.save_path, f'{self.nowtime}_{save_filename}.pth')
+        torch.save(
+            weight_dict, 
+            file_save_path
+        )
+
+        log_print(self.state_name, f"Saved weight to {file_save_path}")
+
+    @classmethod
+    def get_cfg(
+        cls,
+    ):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--cfg-path", required=True)
+        args = parser.parse_args()
+
+        with open(args.cfg_path, 'r') as file:
+            cfg = yaml.safe_load(file)
+
+        cfg_handler = cls(
+            cfg=cfg,
+        )
+        return cfg_handler
+
 def get_trainable_params(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -28,18 +101,6 @@ def load_data(file_path):
     with open(file_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
         return data
-    
-def build_multi_turn_prompt(messages: List[Dict[str, str]]) -> str:
-    messages = ast.literal_eval(messages)
-    prompt = ""
-    for msg in messages:
-        role = msg["role"].upper()  # e.g. "USER" or "ASSISTANT"
-        content = msg["content"]
-        prompt += f"{role}: {content} "
-    # Optionally, you can add an "ASSISTANT:" or "SYSTEM:" at the end to indicate
-    # the model should continue from the assistant's turn.
-    prompt += "ASSISTANT: "
-    return prompt
 
 def set_seed(seed=42):
     random.seed(seed)
@@ -47,44 +108,6 @@ def set_seed(seed=42):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
-
-def checkpath(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-def get_cfg():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--cfg-path", required=True)
-    args = parser.parse_args()
-
-    with open(args.cfg_path, 'r') as file:
-        cfg = yaml.safe_load(file)
-
-    print()
-    log_print('Config loader', f"loaded config:")
-    pprint(cfg)
-
-    return cfg
-
-def save_cfg(cfg):
-    nowtime = datetime.now().strftime("%y%m%d%H%M")
-    save_path = os.path.join(cfg['task'].get("root_path"), cfg['task'].get("output_path"))
-
-    save_path = os.path.join(save_path, nowtime)
-    checkpath(save_path)
-
-    log_save_path = os.path.join(save_path, nowtime + '_result.log')
-    with open(log_save_path, "w") as file:
-        # file.write(cfg + "\n")
-        yaml.safe_dump(cfg, file, default_flow_style=False)
-
-    log_print('Config saver', f"Saved config to {log_save_path}")
-
-    return save_path, log_save_path
-
-def save_result(result, log_save_path):
-    with open(log_save_path, "a") as f:
-        f.write(f"{result}\n")
 
 def highlight(
     text: str = 'debug',
@@ -124,7 +147,6 @@ def calu_dict_avg(
         print(f'[{state}_{str(epoch_idx)}_Results]', '=' * 43, '\n')
 
     return local_metrics
-    
 
 
 
@@ -136,4 +158,4 @@ def calu_dict_avg(
 
 
 
-    
+
