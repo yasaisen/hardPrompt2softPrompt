@@ -19,6 +19,7 @@ class PrefixTuningPolicyModel(nn.Module):
         model_name: str, 
         prefix_prompt: str=None, 
         pretrain_path=None, 
+        gradient_checkpointing: bool=False,
         device: str="cuda", 
         torch_dtype=torch.float32
     ):
@@ -37,6 +38,7 @@ class PrefixTuningPolicyModel(nn.Module):
         if self.tokenizer.pad_token is None:
             log_print(self.state_name, f"pad_token=None")
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.base_model.config.gradient_checkpointing = gradient_checkpointing
 
         # 3) Prefix-tuning parameters
         if prefix_prompt is not None:
@@ -267,6 +269,7 @@ class PrefixTuningPolicyModel(nn.Module):
             model_name=policy_model_name,
             prefix_prompt=prefix_prompt, 
             pretrain_path=policy_model_path, 
+            gradient_checkpointing=True,
             torch_dtype=torch_dtype,
             device=device, 
         )
