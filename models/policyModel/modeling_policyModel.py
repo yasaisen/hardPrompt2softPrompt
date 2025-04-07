@@ -269,7 +269,7 @@ class PrefixTuningPolicyModel(nn.Module):
             model_name=policy_model_name,
             prefix_prompt=prefix_prompt, 
             pretrain_path=policy_model_path, 
-            gradient_checkpointing=True,
+            gradient_checkpointing=False,
             torch_dtype=torch_dtype,
             device=device, 
         )
