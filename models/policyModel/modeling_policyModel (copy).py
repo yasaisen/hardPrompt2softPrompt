@@ -179,32 +179,48 @@ class PrefixTuningPolicyModel(nn.Module):
 
         cutted_input_ids = cutted_input_ids.to(self.device)
         self.prefix_ids = self.prefix_ids.to(self.device)
-        self.prefix_embeddings = self.prefix_embeddings.to(self.device)
 
-        formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
-        # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, cutted_input_ids], dim=1).tolist()[0], skip_special_tokens=False))
-        formaled_inputs_embeds = self.base_model.model.embed_tokens(formaled_input_ids)
+        if not use_prefix:
+            formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
+            # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, cutted_input_ids], dim=1).tolist()[0], skip_special_tokens=False))
+
+            formaled_inputs_embeds = self.base_model.model.embed_tokens(formaled_input_ids)
+
+            inputs_embeds = torch.cat([
+                formaled_inputs_embeds.expand(batch_size, -1, -1), 
+                self.base_model.model.embed_tokens(cutted_input_ids)
+            ], dim=1).to(cutted_input_ids.device)
+
+            # log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
+            transformer_outputs = self.base_model.model(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                return_dict=True,
+                output_hidden_states=True
+            )
+            hidden_states = transformer_outputs.last_hidden_state
+            
+        else:
+            template_start_embeds = self.base_model.model.embed_tokens(template_start)
+            template_end_embeds = self.base_model.model.embed_tokens(template_end)
+
+            unformaled_inputs_embeds = torch.cat([template_start_embeds, self.prefix_embeddings.unsqueeze(0), template_end_embeds], dim=1)
+
+            inputs_embeds = torch.cat([
+                unformaled_inputs_embeds.expand(batch_size, -1, -1), 
+                self.base_model.model.embed_tokens(cutted_input_ids)
+            ], dim=1).to(cutted_input_ids.device)
+            
+            # log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
+            transformer_outputs = self.base_model.model(
+                inputs_embeds=inputs_embeds,
+                attention_mask=attention_mask,
+                return_dict=True,
+                output_hidden_states=True
+            )
+            hidden_states = transformer_outputs.last_hidden_state
         
-        if use_prefix:
-            formaled_inputs_embeds = torch.cat([
-                formaled_inputs_embeds[:, :template_start_len], 
-                self.prefix_embeddings.unsqueeze(0), 
-                formaled_inputs_embeds[:, -template_end_len:]
-            ], dim=1)
-
-        inputs_embeds = torch.cat([
-            formaled_inputs_embeds.expand(batch_size, -1, -1), 
-            self.base_model.model.embed_tokens(cutted_input_ids)
-        ], dim=1).to(cutted_input_ids.device)
-
-        # log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
-        transformer_outputs = self.base_model.model(
-            inputs_embeds=inputs_embeds,
-            attention_mask=attention_mask,
-            return_dict=True,
-            output_hidden_states=True
-        )
-        hidden_states = transformer_outputs.last_hidden_state
+        # GPT LM head => next-token logits
         logits = self.base_model.lm_head(hidden_states)
         
         return logits
