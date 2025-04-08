@@ -238,11 +238,15 @@ class SingleStepPPOTrainer:
 
         entropy_loss = -self.entropy_coef * entropy
         
-        total_loss = policy_loss + entropy_loss + kl_loss
+        total_loss = torch.max(
+            policy_loss + entropy_loss + kl_loss,
+            torch.tensor(0.0, device=self.device)
+        )
 
         self.training_stats['steps'] += 1
         metrics = {
             'step': self.training_stats['steps'],
+            'lr': self.scheduler.get_last_lr()[0],
             'max_new_tokens': max_new_tokens,
 
             'policy_reward': policy_reward,

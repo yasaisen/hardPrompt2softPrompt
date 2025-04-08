@@ -58,11 +58,13 @@ class ConfigHandler:
 
     def save_result(self, 
         result: Dict,
+        print_log: bool = False,
     ):
         with open(self.log_save_path, "a") as f:
             f.write(f"{result}\n")
 
-        log_print(self.state_name, f"Saved result to {self.log_save_path}")
+        if print_log:
+            log_print(self.state_name, f"Saved result to {self.log_save_path}")
 
     def save_weight(self, 
         weight_dict: Dict, 
