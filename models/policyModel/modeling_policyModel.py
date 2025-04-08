@@ -151,7 +151,7 @@ class PrefixTuningPolicyModel(nn.Module):
 
     def forward(self,
         input_ids: torch.Tensor,
-        # attention_mask: torch.Tensor = None,
+        attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
         stage: str = '',
     ):
@@ -170,12 +170,13 @@ class PrefixTuningPolicyModel(nn.Module):
         
         cutted_input_ids = input_ids[:, 7:]
         batch_size, seq_len = cutted_input_ids.shape
-        attention_mask = torch.ones(
-            batch_size, 
-            template_start_len + self.prefix_length + template_end_len + seq_len, 
-            dtype=torch.long, 
-            device=cutted_input_ids.device
-        )
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                batch_size, 
+                template_start_len + self.prefix_length + template_end_len + seq_len, 
+                dtype=torch.long, 
+                device=cutted_input_ids.device
+            )
 
         cutted_input_ids = cutted_input_ids.to(self.device)
         self.prefix_ids = self.prefix_ids.to(self.device)
