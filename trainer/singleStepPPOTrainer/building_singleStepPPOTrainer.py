@@ -228,7 +228,7 @@ class SingleStepPPOTrainer:
 
         entropy_loss = -self.entropy_coef * entropy
         
-        total_loss = policy_loss + entropy_loss + kl_loss,
+        total_loss = policy_loss + entropy_loss + kl_loss
 
         self.training_stats['steps'] += 1
         metrics = {
