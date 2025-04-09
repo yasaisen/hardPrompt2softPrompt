@@ -120,17 +120,77 @@ class PrefixTuningPolicyModel(nn.Module):
         return response, old_log_prob, generated_ids
 
     def full_forward(self, 
-        messages_ids: torch.Tensor, 
+        messages_ids: torch.Tensor,
         response_ids: torch.Tensor,
+        use_prefix: bool,
+        temperature: float = 1.0
+    ):
+        ### get full response logits from forward pass response to policy model ###
+        combined_ids = torch.cat([messages_ids, response_ids], dim=1)
+        highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
+
+        logits = self(
+            input_ids=combined_ids, 
+            use_prefix=use_prefix,
+            stage='prefill',
+        )
+        response_logits = logits[:, -response_ids.shape[1]:] # [1, seq_len + 1, 256000]
+
+        probs = F.softmax(response_logits / temperature, dim=-1)
+        log_probs = F.log_softmax(response_logits / temperature, dim=-1)
+        entropy = -(probs * log_probs).sum(dim=-1).mean()
+
+        ### calculate new_log_prob ###
+        token_log_probs = torch.gather( # [1, seq_len]
+            log_probs,
+            -1,
+            response_ids.unsqueeze(-1)
+        ).squeeze(-1)
+        # log_print(self.state_name, f"[{highlight()}] [full_forward] {token_log_probs}")
+        log_print(self.state_name, f"[{highlight()}] [prefill] {token_log_probs.shape[1]}")
+        new_log_prob = token_log_probs.sum()
+
+        return response_logits, new_log_prob, entropy
+
+
+    def calculate_token_log_prob(self,
+        logits, 
+        token_id, 
+        temperature=1.0
+    ):
+        """
+        計算單個 token 的 log probability，確保數值穩定性
+        
+        Args:
+            logits: token 的 logits
+            token_id: 要計算概率的 token ID
+            temperature: 溫度參數
+        
+        Returns:
+            log_prob: 對應 token 的 log probability
+        """
+        # 應用溫度參數
+        scaled_logits = logits / temperature
+        
+        # 使用 log_softmax 直接計算，而不是先 softmax 再 log，提高數值穩定性
+        log_probs = F.log_softmax(scaled_logits, dim=-1)
+        
+        # 獲取指定 token 的 log probability
+        token_log_prob = log_probs[token_id].item()
+        
+        return token_log_prob
+
+    def generate_response(self, 
+        messages_ids: torch.Tensor, 
+        max_new_tokens: int = 50, 
         use_prefix: bool = True,
         temperature: float = 1.0
     ):
         self.eval()
-        log_probs = []
-        all_probs = []
-        all_logits = []
         generated_ids = []
-        for idx in range(response_ids.shape[1]):
+        token_log_probs = []  # 儲存每個 token 的 log probability
+        
+        for _ in range(max_new_tokens):
             input_ids = torch.cat([messages_ids, torch.tensor([generated_ids], dtype=torch.long, device=self.device)], dim=1)
             with torch.no_grad():
                 logits = self(
@@ -139,23 +199,93 @@ class PrefixTuningPolicyModel(nn.Module):
                     stage='decode',
                 )
             next_token_logits = logits[0, -1, :]
-            if temperature != 1.0:
-                next_token_logits = next_token_logits / temperature
-
-            probs = F.softmax(next_token_logits, dim=-1)
-            next_token_id = response_ids[:, idx].item()
-            log_prob = torch.log(probs[next_token_id] + 1e-10)
+            
+            log_probs = F.log_softmax(next_token_logits / temperature, dim=-1)
+            
+            # greedy search
+            next_token_id = torch.argmax(log_probs, dim=-1).item()
+            token_log_prob = log_probs[next_token_id].item()
             
             generated_ids.append(next_token_id)
-            log_probs.append(log_prob.item())
-            all_probs.append(probs)
-            all_logits.append(next_token_logits)
-
-        new_log_prob = torch.tensor(log_probs, dtype=self.torch_dtype, device=self.device).sum()
-        entropy = sum([-(p * torch.log(p + 1e-10)).sum() for p in all_probs]) / len(all_probs)
-        response_logits = torch.stack(all_logits, dim=0).unsqueeze(0)  # [1, seq_len, vocab_size]
+            token_log_probs.append(token_log_prob)
+            
+            if next_token_id == self.tokenizer.eos_token_id:
+                break
+                
+        log_print(self.state_name, f"[{highlight()}] [decode] {len(generated_ids)}")
+        response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+        old_log_prob = sum(token_log_probs)
+        generated_ids = torch.tensor(generated_ids, dtype=torch.long, device=self.device).unsqueeze(0)
         
+        return response, old_log_prob, generated_ids
+
+
+    def full_forward(self, 
+        messages_ids: torch.Tensor,
+        response_ids: torch.Tensor,
+        use_prefix: bool,
+        temperature: float = 1.0
+    ):
+        combined_ids = torch.cat([messages_ids, response_ids], dim=1)
+        highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
+
+        logits = self(
+            input_ids=combined_ids, 
+            use_prefix=use_prefix,
+        )
+        response_logits = logits[:, -response_ids.shape[1]:] 
+        
+        log_probs = F.log_softmax(response_logits / temperature, dim=-1)
+        
+        token_log_probs = torch.gather(
+            log_probs,
+            -1,
+            response_ids.unsqueeze(-1)
+        ).squeeze(-1)
+        new_log_prob = token_log_probs.sum()
+
+        probs = torch.exp(log_probs)
+        entropy = -(probs * log_probs).sum(dim=-1).mean()
+
         return response_logits, new_log_prob, entropy
+
+    # def full_forward(self, 
+    #     messages_ids: torch.Tensor, 
+    #     response_ids: torch.Tensor,
+    #     use_prefix: bool = True,
+    #     temperature: float = 1.0
+    # ):
+    #     self.eval()
+    #     log_probs = []
+    #     all_probs = []
+    #     all_logits = []
+    #     generated_ids = []
+    #     for idx in range(response_ids.shape[1]):
+    #         input_ids = torch.cat([messages_ids, torch.tensor([generated_ids], dtype=torch.long, device=self.device)], dim=1)
+    #         with torch.no_grad():
+    #             logits = self(
+    #                 input_ids=input_ids, 
+    #                 use_prefix=use_prefix,
+    #                 stage='decode',
+    #             )
+    #         next_token_logits = logits[0, -1, :]
+    #         if temperature != 1.0:
+    #             next_token_logits = next_token_logits / temperature
+
+    #         probs = F.softmax(next_token_logits, dim=-1)
+    #         next_token_id = response_ids[:, idx].item()
+    #         log_prob = torch.log(probs[next_token_id] + 1e-10)
+            
+    #         generated_ids.append(next_token_id)
+    #         log_probs.append(log_prob.item())
+    #         all_probs.append(probs)
+    #         all_logits.append(next_token_logits)
+
+    #     new_log_prob = torch.tensor(log_probs, dtype=self.torch_dtype, device=self.device).sum()
+    #     entropy = sum([-(p * torch.log(p + 1e-10)).sum() for p in all_probs]) / len(all_probs)
+    #     response_logits = torch.stack(all_logits, dim=0).unsqueeze(0)  # [1, seq_len, vocab_size]
+        
+    #     return response_logits, new_log_prob, entropy
 
     def forward(self,
         input_ids: torch.Tensor,
