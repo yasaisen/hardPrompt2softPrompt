@@ -168,6 +168,7 @@ class SingleStepPPOTrainer:
             messages_ids=messages_ids, 
             print_response=False,
         )
+        log_print(self.state_name, f"[{highlight()}] {policy_old_log_prob}")
 
         policy_reward = self.compute_reward(
             context=context, 
@@ -208,6 +209,7 @@ class SingleStepPPOTrainer:
                 use_prefix=True,
                 temperature=self.temperature,
             )
+        log_print(self.state_name, f"[{highlight()}] {policy_new_log_prob}")
 
         total_kl = torch.tensor(0.0, device=self.device)
         for step_idx in range(response_ids.shape[1]):
