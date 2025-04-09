@@ -146,8 +146,6 @@ class PrefixTuningPolicyModel(nn.Module):
             -1,
             response_ids.unsqueeze(-1)
         ).squeeze(-1)
-        # log_print(self.state_name, f"[{highlight()}] [full_forward] {token_log_probs}")
-        log_print(self.state_name, f"[{highlight()}] [prefill] {token_log_probs.shape[1]}")
         new_log_prob = token_log_probs.sum()
 
         return response_logits, new_log_prob, entropy
@@ -184,7 +182,6 @@ class PrefixTuningPolicyModel(nn.Module):
             if next_token_id == self.tokenizer.eos_token_id:
                 break
                 
-        log_print(self.state_name, f"[{highlight()}] [decode] {len(generated_ids)}")
         response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         old_log_prob = sum(token_log_probs)
         generated_ids = torch.tensor(generated_ids, dtype=torch.long, device=self.device).unsqueeze(0)

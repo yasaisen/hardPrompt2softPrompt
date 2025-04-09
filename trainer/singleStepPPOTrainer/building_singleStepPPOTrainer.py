@@ -209,7 +209,7 @@ class SingleStepPPOTrainer:
                 temperature=self.temperature,
             )
 
-        for new, old in zip(policy_old_log_probs, policy_new_log_probs):
+        for new, old in zip(policy_old_log_probs[0], policy_new_log_probs[0]):
             log_print(self.state_name, f"[{highlight()}] new: {new} / old:{old} / diff: {new - old}")
 
         total_kl = torch.tensor(0.0, device=self.device)
