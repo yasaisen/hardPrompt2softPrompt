@@ -209,10 +209,14 @@ class SingleStepPPOTrainer:
                 temperature=self.temperature,
             )
 
-        log_print(self.state_name, f"[{highlight()}] new: {len(policy_new_log_probs.tolist()[0])} / old:{len(policy_old_log_probs)}")
+            
+        log_print(self.state_name, f"[{highlight()}]" + '='*43)
+        log_print(self.state_name, f"[{highlight()}] new:{len(policy_new_log_probs.tolist()[0])} / old:{len(policy_old_log_probs)}")
         for new, old in zip(policy_new_log_probs.tolist()[0], policy_old_log_probs):
-            log_print(self.state_name, f"[{highlight()}] new: {new} / old:{old} / diff: {new - old}")
+            log_print(self.state_name, f"[{highlight()}] old: {old} / new: {new} / d: {new / old} / diff: {new - old}")
+        log_print(self.state_name, f"[{highlight()}]" + '='*43)
 
+        
         total_kl = torch.tensor(0.0, device=self.device)
         for step_idx in range(response_ids.shape[1]):
             step_kl = self.compute_stepwise_kl(
