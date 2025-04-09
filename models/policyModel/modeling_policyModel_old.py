@@ -86,12 +86,10 @@ class PrefixTuningPolicyModel(nn.Module):
         temperature: float = 1.0
     ):
         self.eval()
-        generated_tokens = []
-        sum_logprob = 0.0
-        probs_list = []
-        
+        generated_ids = []
+        old_log_prob = 0.0
         for _ in range(max_new_tokens):
-            input_ids = torch.cat([messages_ids, torch.tensor([generated_tokens], dtype=torch.long, device=self.device)], dim=1)
+            input_ids = torch.cat([messages_ids, torch.tensor([generated_ids], dtype=torch.long, device=self.device)], dim=1)
             with torch.no_grad():
                 logits = self(
                     input_ids=input_ids, 
@@ -107,16 +105,17 @@ class PrefixTuningPolicyModel(nn.Module):
             next_token_id = torch.argmax(next_token_logits, dim=-1).item()
             log_prob = torch.log(probs[next_token_id] + 1e-10)
             
-            generated_tokens.append(next_token_id)
-            sum_logprob += log_prob.item()
-            probs_list.append(probs.unsqueeze(0))
+            generated_ids.append(next_token_id)
+            old_log_prob += log_prob.item()
+            # log_print(self.state_name, f"[{highlight()}] [generate_response] {log_prob.item()}")
             
             if next_token_id == self.tokenizer.eos_token_id:
                 break
-
-        response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        log_print(self.state_name, f"[{highlight()}] [decode] {len(generated_ids)}")
+        response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+        generated_ids = torch.tensor(generated_ids, dtype=torch.long, device=self.device).unsqueeze(0)
         
-        return response, sum_logprob, probs_list
+        return response, old_log_prob, generated_ids
 
     def full_forward(self, 
         messages_ids: torch.Tensor,
@@ -125,8 +124,8 @@ class PrefixTuningPolicyModel(nn.Module):
         temperature: float = 1.0
     ):
         ### get full response logits from forward pass response to policy model ###
-        combined_ids = torch.cat([messages_ids[:, :-3], response_ids[:, 7:-3]], dim=1)
-        # highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
+        combined_ids = torch.cat([messages_ids, response_ids], dim=1)
+        highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
 
         logits = self(
             input_ids=combined_ids, 
@@ -145,13 +144,15 @@ class PrefixTuningPolicyModel(nn.Module):
             -1,
             response_ids.unsqueeze(-1)
         ).squeeze(-1)
+        # log_print(self.state_name, f"[{highlight()}] [full_forward] {token_log_probs}")
+        log_print(self.state_name, f"[{highlight()}] [prefill] {token_log_probs.shape[1]}")
         new_log_prob = token_log_probs.sum()
 
         return response_logits, new_log_prob, entropy
 
     def forward(self,
         input_ids: torch.Tensor,
-        # attention_mask: torch.Tensor = None,
+        attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
         stage: str = '',
     ):
@@ -170,57 +171,42 @@ class PrefixTuningPolicyModel(nn.Module):
         
         cutted_input_ids = input_ids[:, 7:]
         batch_size, seq_len = cutted_input_ids.shape
-        attention_mask = torch.ones(
-            batch_size, 
-            template_start_len + self.prefix_length + template_end_len + seq_len, 
-            dtype=torch.long, 
-            device=cutted_input_ids.device
-        )
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                batch_size, 
+                template_start_len + self.prefix_length + template_end_len + seq_len, 
+                dtype=torch.long, 
+                device=cutted_input_ids.device
+            )
 
         cutted_input_ids = cutted_input_ids.to(self.device)
         self.prefix_ids = self.prefix_ids.to(self.device)
+        self.prefix_embeddings = self.prefix_embeddings.to(self.device)
 
-        if not use_prefix:
-            formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
-            # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, cutted_input_ids], dim=1).tolist()[0], skip_special_tokens=False))
-
-            formaled_inputs_embeds = self.base_model.model.embed_tokens(formaled_input_ids)
-
-            inputs_embeds = torch.cat([
-                formaled_inputs_embeds.expand(batch_size, -1, -1), 
-                self.base_model.model.embed_tokens(cutted_input_ids)
-            ], dim=1).to(cutted_input_ids.device)
-
-            # log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
-            transformer_outputs = self.base_model.model(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                return_dict=True,
-                output_hidden_states=True
-            )
-            hidden_states = transformer_outputs.last_hidden_state
-            
-        else:
-            template_start_embeds = self.base_model.model.embed_tokens(template_start)
-            template_end_embeds = self.base_model.model.embed_tokens(template_end)
-
-            unformaled_inputs_embeds = torch.cat([template_start_embeds, self.prefix_embeddings.unsqueeze(0), template_end_embeds], dim=1)
-
-            inputs_embeds = torch.cat([
-                unformaled_inputs_embeds.expand(batch_size, -1, -1), 
-                self.base_model.model.embed_tokens(cutted_input_ids)
-            ], dim=1).to(cutted_input_ids.device)
-            
-            # log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
-            transformer_outputs = self.base_model.model(
-                inputs_embeds=inputs_embeds,
-                attention_mask=attention_mask,
-                return_dict=True,
-                output_hidden_states=True
-            )
-            hidden_states = transformer_outputs.last_hidden_state
+        formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
+        # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, cutted_input_ids], dim=1).tolist()[0], skip_special_tokens=False))
+        formaled_inputs_embeds = self.base_model.model.embed_tokens(formaled_input_ids)
         
-        # GPT LM head => next-token logits
+        if use_prefix:
+            formaled_inputs_embeds = torch.cat([
+                formaled_inputs_embeds[:, :template_start_len], 
+                self.prefix_embeddings.unsqueeze(0), 
+                formaled_inputs_embeds[:, -template_end_len:]
+            ], dim=1)
+
+        inputs_embeds = torch.cat([
+            formaled_inputs_embeds.expand(batch_size, -1, -1), 
+            self.base_model.model.embed_tokens(cutted_input_ids)
+        ], dim=1).to(cutted_input_ids.device)
+
+        # log_print(self.state_name, f"[{highlight()}] [{stage}] {use_prefix} / {inputs_embeds.shape[1]}")
+        transformer_outputs = self.base_model.model(
+            inputs_embeds=inputs_embeds,
+            attention_mask=attention_mask,
+            return_dict=True,
+            output_hidden_states=True
+        )
+        hidden_states = transformer_outputs.last_hidden_state
         logits = self.base_model.lm_head(hidden_states)
         
         return logits

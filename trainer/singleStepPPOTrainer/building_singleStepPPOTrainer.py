@@ -86,7 +86,6 @@ class SingleStepPPOTrainer:
 
     def get_response(self,
         messages_ids: torch.Tensor, 
-        output_probs: bool = False,
         print_response: bool = False,
     ):
         messages_token_len = int(messages_ids.shape[1]) - 7 + 6 + int(self.policy.prefix_ids.shape[1])
@@ -94,7 +93,7 @@ class SingleStepPPOTrainer:
         if print_response:
             highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
 
-        reference_response, reference_log_prob, reference_probs = self.policy.generate_response(
+        reference_response, reference_log_prob, reference_generated_ids = self.policy.generate_response(
             messages_ids,
             max_new_tokens=max_new_tokens,
             use_prefix=False,
@@ -102,7 +101,7 @@ class SingleStepPPOTrainer:
         )
         # log_print(self.state_name, f"[{highlight()}] max_token_len: {messages_token_len} / {max_new_tokens}")
 
-        policy_response, policy_log_prob, policy_probs = self.policy.generate_response(
+        policy_response, policy_log_prob, policy_generated_ids = self.policy.generate_response(
             messages_ids,
             max_new_tokens=max_new_tokens,
             use_prefix=True,
@@ -113,11 +112,8 @@ class SingleStepPPOTrainer:
         if print_response:
             highlight_show('reference_response', reference_response)
             highlight_show('policy_response', policy_response)
-            
-        if output_probs:
-            return policy_response, policy_log_prob, policy_probs, reference_response, reference_log_prob, reference_probs, max_new_tokens
 
-        return policy_response, policy_log_prob, reference_response, reference_log_prob, max_new_tokens
+        return policy_response, policy_log_prob, policy_generated_ids, reference_response, reference_generated_ids, max_new_tokens
 
     def compute_reward(self, 
         context: str, 
@@ -168,9 +164,8 @@ class SingleStepPPOTrainer:
             chat_dict=messages, 
             is_response=False
         )
-        policy_response, policy_old_log_prob, reference_response, _, max_new_tokens = self.get_response(
+        policy_response, policy_old_log_prob, response_ids, reference_response, reference_generated_ids, max_new_tokens = self.get_response(
             messages_ids=messages_ids, 
-            output_probs=False,
             print_response=False,
         )
 
@@ -183,16 +178,16 @@ class SingleStepPPOTrainer:
             response=reference_response
         )
 
-        response_ids = self.policy.chat_template_tokenizer(
-            chat_dict=policy_response, 
-            is_response=True
-        )
+        # response_ids = self.policy.chat_template_tokenizer(
+        #     chat_dict=policy_response, 
+        #     is_response=True
+        # )
 
         self.policy.eval()
         with torch.no_grad():
             reference_response_logits, _, _ = self.policy.full_forward(
                 messages_ids=messages_ids, 
-                response_ids=response_ids, 
+                response_ids=response_ids,
                 use_prefix=False,
                 temperature=self.temperature,
             )
@@ -201,7 +196,7 @@ class SingleStepPPOTrainer:
             with torch.no_grad():
                 policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
                     messages_ids=messages_ids, 
-                    response_ids=response_ids, 
+                    response_ids=response_ids,
                     use_prefix=True,
                     temperature=self.temperature,
                 )
@@ -209,7 +204,7 @@ class SingleStepPPOTrainer:
             self.policy.train()
             policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
                 messages_ids=messages_ids, 
-                response_ids=response_ids, 
+                response_ids=response_ids,
                 use_prefix=True,
                 temperature=self.temperature,
             )
