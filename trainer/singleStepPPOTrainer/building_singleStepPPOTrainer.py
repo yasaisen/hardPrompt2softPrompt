@@ -208,7 +208,8 @@ class SingleStepPPOTrainer:
                 use_prefix=True,
                 temperature=self.temperature,
             )
-            
+
+        log_print(self.state_name, f"[{highlight()}] new: {len(policy_new_log_probs.tolist()[0])} / old:{len(policy_old_log_probs)}")
         for new, old in zip(policy_new_log_probs.tolist()[0], policy_old_log_probs):
             log_print(self.state_name, f"[{highlight()}] new: {new} / old:{old} / diff: {new - old}")
 
