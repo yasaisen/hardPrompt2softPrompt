@@ -211,11 +211,12 @@ class SingleStepPPOTrainer:
 
             
         log_print(self.state_name, f"[{highlight()}]" + '='*43)
-        log_print(self.state_name, f"[{highlight()}] new:{len(policy_new_log_probs.tolist()[0])} / old:{len(policy_old_log_probs)}")
-        print(policy_new_log_probs.tolist()[0])
-        print(policy_old_log_probs)
-        for new, old in zip(policy_new_log_probs.tolist()[0], policy_old_log_probs):
-            log_print(self.state_name, f"[{highlight()}] old: {old} / new: {new} / d: {new / old} / diff: {new - old}")
+        log_print(self.state_name, f"[{highlight()}] new:{policy_new_log_probs.shape} / old:{policy_old_log_probs.shape}")
+        # log_print(self.state_name, f"[{highlight()}] new:{len(policy_new_log_probs.tolist()[0])} / old:{len(policy_old_log_probs)}")
+        # print(policy_new_log_probs.tolist()[0])
+        # print(policy_old_log_probs)
+        # for new, old in zip(policy_new_log_probs.tolist()[0], policy_old_log_probs):
+        #     log_print(self.state_name, f"[{highlight()}] old: {old} / new: {new} / d: {new / old} / diff: {new - old}")
         log_print(self.state_name, f"[{highlight()}]" + '='*43)
 
         

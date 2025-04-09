@@ -108,7 +108,7 @@ class PrefixTuningPolicyModel(nn.Module):
             log_prob = torch.log(probs[next_token_id] + 1e-10)
             
             generated_ids += [next_token_id]
-            log_probs += [log_prob.item()]
+            log_probs += [log_prob]
             
             if next_token_id == self.tokenizer.eos_token_id:
                 break
