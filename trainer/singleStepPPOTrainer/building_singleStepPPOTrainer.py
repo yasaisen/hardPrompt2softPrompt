@@ -93,7 +93,7 @@ class SingleStepPPOTrainer:
         if print_response:
             highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
 
-        reference_response, reference_log_prob, reference_generated_ids = self.policy.generate_response(
+        reference_response, reference_log_prob, reference_generated_ids, reference_log_probs = self.policy.generate_response(
             messages_ids,
             max_new_tokens=max_new_tokens,
             use_prefix=False,
@@ -101,7 +101,7 @@ class SingleStepPPOTrainer:
         )
         # log_print(self.state_name, f"[{highlight()}] max_token_len: {messages_token_len} / {max_new_tokens}")
 
-        policy_response, policy_log_prob, policy_generated_ids = self.policy.generate_response(
+        policy_response, policy_log_prob, policy_generated_ids, policy_log_probs = self.policy.generate_response(
             messages_ids,
             max_new_tokens=max_new_tokens,
             use_prefix=True,
@@ -113,7 +113,7 @@ class SingleStepPPOTrainer:
             highlight_show('reference_response', reference_response)
             highlight_show('policy_response', policy_response)
 
-        return policy_response, policy_log_prob, policy_generated_ids, reference_response, reference_generated_ids, max_new_tokens
+        return policy_response, policy_log_prob, policy_generated_ids, reference_response, reference_generated_ids, max_new_tokens, policy_log_probs
 
     def compute_reward(self, 
         context: str, 
@@ -164,11 +164,10 @@ class SingleStepPPOTrainer:
             chat_dict=messages, 
             is_response=False
         )
-        policy_response, policy_old_log_prob, response_ids, reference_response, reference_generated_ids, max_new_tokens = self.get_response(
+        policy_response, policy_old_log_prob, response_ids, reference_response, _, max_new_tokens, policy_old_log_probs = self.get_response(
             messages_ids=messages_ids, 
             print_response=False,
         )
-        log_print(self.state_name, f"[{highlight()}] {policy_old_log_prob}")
 
         policy_reward = self.compute_reward(
             context=context, 
@@ -186,7 +185,7 @@ class SingleStepPPOTrainer:
 
         self.policy.eval()
         with torch.no_grad():
-            reference_response_logits, _, _ = self.policy.full_forward(
+            reference_response_logits, _, _, _ = self.policy.full_forward(
                 messages_ids=messages_ids, 
                 response_ids=response_ids,
                 use_prefix=False,
@@ -195,7 +194,7 @@ class SingleStepPPOTrainer:
         if valid:
             self.policy.eval()
             with torch.no_grad():
-                policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
+                policy_response_logits, policy_new_log_prob, entropy, policy_new_log_probs = self.policy.full_forward(
                     messages_ids=messages_ids, 
                     response_ids=response_ids,
                     use_prefix=True,
@@ -203,13 +202,15 @@ class SingleStepPPOTrainer:
                 )
         else:
             self.policy.train()
-            policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
+            policy_response_logits, policy_new_log_prob, entropy, policy_new_log_probs = self.policy.full_forward(
                 messages_ids=messages_ids, 
                 response_ids=response_ids,
                 use_prefix=True,
                 temperature=self.temperature,
             )
-        log_print(self.state_name, f"[{highlight()}] {policy_new_log_prob}")
+
+        for new, old in zip(policy_old_log_probs, policy_new_log_probs):
+            log_print(self.state_name, f"[{highlight()}] new: {new} / old:{old} / diff: {new - old}")
 
         total_kl = torch.tensor(0.0, device=self.device)
         for step_idx in range(response_ids.shape[1]):
