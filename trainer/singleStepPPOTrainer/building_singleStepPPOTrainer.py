@@ -210,14 +210,14 @@ class SingleStepPPOTrainer:
             )
 
             
-        log_print(self.state_name, f"[{highlight()}]" + '='*43)
-        log_print(self.state_name, f"[{highlight()}] new:{policy_new_log_probs.shape} / old:{policy_old_log_probs.shape}")
+        # log_print(self.state_name, f"[{highlight()}]" + '='*43)
+        # log_print(self.state_name, f"[{highlight()}] new:{policy_new_log_probs.shape} / old:{policy_old_log_probs.shape}")
         # log_print(self.state_name, f"[{highlight()}] new:{len(policy_new_log_probs.tolist()[0])} / old:{len(policy_old_log_probs)}")
         # print(policy_new_log_probs.tolist()[0])
         # print(policy_old_log_probs)
         # for new, old in zip(policy_new_log_probs.tolist()[0], policy_old_log_probs):
         #     log_print(self.state_name, f"[{highlight()}] old: {old} / new: {new} / d: {new / old} / diff: {new - old}")
-        log_print(self.state_name, f"[{highlight()}]" + '='*43)
+        # log_print(self.state_name, f"[{highlight()}]" + '='*43)
 
         
         total_kl = torch.tensor(0.0, device=self.device)
@@ -241,6 +241,7 @@ class SingleStepPPOTrainer:
         surr1 = ratio * reward_tensor
         surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * reward_tensor
         policy_loss = -torch.min(surr1, surr2)
+        log_print(self.state_name, f"[{highlight()}] surr1:{surr1} / surr2:{surr2} / policy_loss:{policy_loss}")
 
         entropy_loss = -self.entropy_coef * entropy
         
