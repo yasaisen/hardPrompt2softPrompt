@@ -30,7 +30,7 @@ task:
   pct_start: 0.2
   anneal_strategy: "cos"
   
-  clip_epsilon: 0.15
+  clip_epsilon: 0.2
   entropy_coef: 0.03
   kl_coef: 0.2
   max_grad_norm: 1.0
