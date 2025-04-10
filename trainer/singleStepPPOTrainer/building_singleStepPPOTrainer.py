@@ -221,10 +221,11 @@ class SingleStepPPOTrainer:
         log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
 
         policy_new_log_prob = policy_new_log_prob / 2 - 1.3
+        reward = policy_reward - reference_reward
 
         log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
         ratio = torch.exp(policy_new_log_prob - policy_old_log_prob)
-        reward_tensor = torch.tensor(policy_reward, device=self.device)
+        reward_tensor = torch.tensor(reward, device=self.device)
         surr1 = ratio * reward_tensor
         surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * reward_tensor
         policy_loss = -torch.min(surr1, surr2)
