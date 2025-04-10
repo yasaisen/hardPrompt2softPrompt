@@ -180,7 +180,7 @@ class SingleStepPPOTrainer:
 
         self.policy.eval()
         with torch.no_grad():
-            reference_response_logits, _, _ = self.policy.full_forward(
+            reference_response_logits, reference_new_log_prob, _ = self.policy.full_forward(
                 messages_ids=messages_ids, 
                 response_ids=response_ids,
                 use_prefix=False,
@@ -218,10 +218,11 @@ class SingleStepPPOTrainer:
             torch.tensor(0.0, device=self.device)
         )
 
-        log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
+        # log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
 
-        policy_new_log_prob = policy_new_log_prob / 2 - 1.3
-        reward = policy_reward - reference_reward + 1e-3
+        # policy_new_log_prob = policy_new_log_prob / 2 - 1.3
+        policy_old_log_prob = reference_new_log_prob
+        reward = policy_reward - reference_reward + 1e-5
 
         log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
         ratio = torch.exp(policy_new_log_prob - policy_old_log_prob)
