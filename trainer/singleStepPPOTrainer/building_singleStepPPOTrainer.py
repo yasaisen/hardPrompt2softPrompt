@@ -156,10 +156,11 @@ class SingleStepPPOTrainer:
     def compute_policy_loss(self,
         context: str,
         messages: List[Dict[str, str]], 
-        policy_old_log_prob: float = 0.0,
+        policy_old_log_prob: torch.Tensor = torch.tensor(0.0),
         valid: bool = False, 
         output_response: bool = False, 
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
+        policy_old_log_prob = policy_old_log_prob.to(self.device)
         
         messages_ids = self.policy.chat_template_tokenizer(
             chat_dict=messages, 
