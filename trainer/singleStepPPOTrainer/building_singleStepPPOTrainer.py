@@ -156,6 +156,7 @@ class SingleStepPPOTrainer:
     def compute_policy_loss(self,
         context: str,
         messages: List[Dict[str, str]], 
+        policy_old_log_prob: float = 0.0,
         valid: bool = False, 
         output_response: bool = False, 
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
@@ -164,7 +165,7 @@ class SingleStepPPOTrainer:
             chat_dict=messages, 
             is_response=False
         )
-        policy_response, policy_old_log_prob, response_ids, reference_response, _, _, max_new_tokens = self.get_response(
+        policy_response, _policy_old_log_prob, response_ids, reference_response, _, _, max_new_tokens = self.get_response(
             messages_ids=messages_ids, 
             print_response=False,
         )
@@ -221,7 +222,7 @@ class SingleStepPPOTrainer:
         # log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
 
         # policy_new_log_prob = policy_new_log_prob / 2 - 1.3
-        policy_old_log_prob = reference_new_log_prob
+        # policy_old_log_prob = reference_new_log_prob
         reward = policy_reward - reference_reward + 1e-5
 
         log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
@@ -236,6 +237,43 @@ class SingleStepPPOTrainer:
         
         total_loss = policy_loss + entropy_loss + kl_loss
 
+        metrics = self.update_metrics(
+            max_new_tokens=max_new_tokens,
+            policy_reward=policy_reward,
+            reference_reward=reference_reward,
+            policy_old_log_prob=policy_old_log_prob.item(),
+            policy_new_log_prob=policy_new_log_prob.item(),
+            ratio=ratio.item(),
+            avg_kl=avg_kl.item(),
+            policy_loss=policy_loss.item(),
+            kl_loss=kl_loss.item(),
+            entropy_loss=entropy_loss.item(),
+            total_loss=total_loss.item(),
+            messages_ids=messages_ids,
+            policy_response=policy_response,
+            reference_response=reference_response,
+            output_response=output_response,
+        )
+
+        return total_loss, policy_new_log_prob, metrics
+    
+    def update_metrics(self,
+        max_new_tokens: int,
+        policy_reward: float,
+        reference_reward: float,
+        policy_old_log_prob: float,
+        policy_new_log_prob: float,
+        ratio: float,
+        avg_kl: float,
+        policy_loss: float,
+        kl_loss: float,
+        entropy_loss: float,
+        total_loss: float,
+        messages_ids: torch.Tensor,
+        policy_response: str,
+        reference_response: str,
+        output_response: bool = False,
+    ):
         self.training_stats['steps'] += 1
         metrics = {
             'step': self.training_stats['steps'],
@@ -245,19 +283,19 @@ class SingleStepPPOTrainer:
             'policy_reward': policy_reward,
             'reference_reward': reference_reward,
 
-            'old_log_prob': policy_old_log_prob.item(),
-            'new_log_prob': policy_new_log_prob.item(),
-            'ratio': ratio.item(),
-            'step_avg_kl': avg_kl.item(),
+            'old_log_prob': policy_old_log_prob,
+            'new_log_prob': policy_new_log_prob,
+            'ratio': ratio,
+            'step_avg_kl': avg_kl,
 
-            'policy_loss': policy_loss.item(),
-            'kl_loss': kl_loss.item(),
-            'entropy_loss': entropy_loss.item(),
-            'total_loss': total_loss.item(),
+            'policy_loss': policy_loss,
+            'kl_loss': kl_loss,
+            'entropy_loss': entropy_loss,
+            'total_loss': total_loss,
         }
         self.training_stats['total_policy_reward'] += policy_reward
         self.training_stats['total_reference_reward'] += reference_reward
-        self.training_stats['total_step_kl'] += avg_kl.item()
+        self.training_stats['total_step_kl'] += avg_kl
 
         self.training_stats['avg_policy_reward'] = self.training_stats['total_policy_reward'] / self.training_stats['steps']
         self.training_stats['avg_reference_reward'] = self.training_stats['total_reference_reward'] / self.training_stats['steps']
@@ -271,7 +309,7 @@ class SingleStepPPOTrainer:
             metrics['policy_response'] = policy_response
             metrics['reference_response'] = reference_response
 
-        return total_loss, metrics
+        return metrics
 
     @classmethod
     def from_config(cls, 
