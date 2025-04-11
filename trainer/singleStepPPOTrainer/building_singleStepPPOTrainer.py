@@ -241,7 +241,7 @@ class SingleStepPPOTrainer:
             max_new_tokens=max_new_tokens,
             policy_reward=policy_reward,
             reference_reward=reference_reward,
-            policy_old_log_prob=policy_old_log_prob,
+            policy_old_log_prob=policy_old_log_prob.item(),
             policy_new_log_prob=policy_new_log_prob.item(),
             ratio=ratio.item(),
             avg_kl=avg_kl.item(),
