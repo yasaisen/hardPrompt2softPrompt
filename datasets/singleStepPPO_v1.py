@@ -39,9 +39,14 @@ class singleStepPPO_v1_Dataset(Dataset):
         messages = ast.literal_eval(context)
         messages[0]['content'] = '好的，題目如下：' + messages[0]['content']
 
-        sample["messages"] = messages
+        for single_sample in messages:
+            single_sample['content'] = [{"type": "text", "text": single_sample['content']},]
 
-        return sample
+        samples = {}
+        samples["messages"] = messages
+        samples["context"] = context
+
+        return samples
         
     @classmethod
     def from_config(cls, cfg):

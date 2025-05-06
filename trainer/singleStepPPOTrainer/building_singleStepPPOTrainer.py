@@ -2,7 +2,7 @@
  Copyright (c) 2025, yasaisen(clover).
  All rights reserved.
 
- last modified in 2504092234
+ last modified in 2505061628
 """
 
 import torch
@@ -13,6 +13,7 @@ from typing import List, Tuple, Dict
 from ...common.utils import log_print, highlight_show, highlight
 from ...models.rewardModel.modeling_rewardModel import ComparativeRewardModel
 from ...models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
+from ...models.valueHead.modeling_valueHead import ValueHead
 
 
 class SingleStepPPOTrainer:
@@ -51,6 +52,9 @@ class SingleStepPPOTrainer:
         self.max_token_len = max_token_len
         self.temperature = temperature
 
+        self.value_clip = 0.2
+        self.vf_coef = 0.3
+
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
         self.max_lr = max_lr
@@ -59,13 +63,30 @@ class SingleStepPPOTrainer:
         self.pct_start = pct_start
         self.anneal_strategy = anneal_strategy
         
-        self.optimizer = optim.AdamW(
+        self.optimizer_policy = optim.AdamW(
             [self.policy.prefix_embeddings],
             lr=self.learning_rate,
             weight_decay=self.weight_decay
         )
-        self.scheduler = optim.lr_scheduler.OneCycleLR(
-            self.optimizer,
+        self.scheduler_policy = optim.lr_scheduler.OneCycleLR(
+            self.optimizer_policy,
+            max_lr=self.max_lr,
+            epochs=self.num_epoch,
+            steps_per_epoch=self.steps_per_epoch,
+            pct_start=self.pct_start,
+            anneal_strategy=self.anneal_strategy
+        )
+
+        hidden_size = self.policy.base_model.config.hidden_size
+        self.value_head = ValueHead(hidden_size).to(self.device)
+
+        self.optimizer_value = optim.AdamW(
+            self.value_head.parameters(),
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay
+        )
+        self.scheduler_value = optim.lr_scheduler.OneCycleLR(
+            self.optimizer_value,
             max_lr=self.max_lr,
             epochs=self.num_epoch,
             steps_per_epoch=self.steps_per_epoch,
@@ -86,35 +107,53 @@ class SingleStepPPOTrainer:
 
     def get_response(self,
         messages_ids: torch.Tensor, 
+        use_prefix: bool,
         print_response: bool = False,
     ):
-        messages_token_len = int(messages_ids.shape[1]) - 7 + 6 + int(self.policy.prefix_ids.shape[1])
+        messages_token_len = int(messages_ids.shape[1]) - 1 + int(self.policy.prefix_ids.shape[1]) # -[temp]
         max_new_tokens = max(self.max_token_len - messages_token_len, 0)
         if print_response:
-            highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, 7:].tolist()[0], skip_special_tokens=False))
+            highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, self.policy.prefix_check_tensor_len:].tolist()[0], skip_special_tokens=False))
 
-        reference_response, reference_log_prob, reference_generated_ids = self.policy.generate_response(
+        policy_response, policy_generated_ids = self.policy.generate_response(
             messages_ids,
             max_new_tokens=max_new_tokens,
-            use_prefix=False,
-            temperature=self.temperature
-        )
-        # log_print(self.state_name, f"[{highlight()}] max_token_len: {messages_token_len} / {max_new_tokens}")
-
-        policy_response, policy_log_prob, policy_generated_ids = self.policy.generate_response(
-            messages_ids,
-            max_new_tokens=max_new_tokens,
-            use_prefix=True,
+            use_prefix=use_prefix,
             temperature=self.temperature
         )
         # log_print(self.state_name, f"[{highlight()}] max_token_len: {messages_token_len} / {max_new_tokens}")
 
         if print_response:
-            highlight_show('reference_response', reference_response)
             highlight_show('policy_response', policy_response)
 
-        return policy_response, policy_log_prob, policy_generated_ids, reference_response, reference_log_prob, reference_generated_ids, max_new_tokens
+        return policy_response, policy_generated_ids, max_new_tokens
+    
+    def get_full_forward(self,
+        messages_ids: torch.Tensor, 
+        response_ids: torch.Tensor, 
+        use_prefix: bool, 
+        valid: bool, 
+    ):
+        if not valid:
+            self.policy.train()
+            response_logits, hidden_states, seq_old_logp, entropy = self.policy.full_forward(
+                messages_ids=messages_ids, 
+                response_ids=response_ids,
+                use_prefix=use_prefix,
+                temperature=self.temperature,
+            )
+        else:
+            self.policy.eval()
+            with torch.no_grad():
+                response_logits, hidden_states, seq_old_logp, entropy = self.policy.full_forward(
+                    messages_ids=messages_ids, 
+                    response_ids=response_ids,
+                    use_prefix=use_prefix,
+                    temperature=self.temperature,
+                )
 
+        return response_logits, hidden_states, seq_old_logp, entropy
+        
     def compute_reward(self, 
         context: str, 
         response: str
@@ -133,130 +172,177 @@ class SingleStepPPOTrainer:
                 response_ids,
                 response_mask
             )
-        return reward.item()
+        # return reward.item()
+        return reward
 
-    def compute_stepwise_kl(self, 
-        policy_logits: torch.Tensor, 
-        reference_logits: torch.Tensor
-    ) -> torch.Tensor:
-        policy_logits = policy_logits.to(torch.float32)
-        reference_logits = reference_logits.to(torch.float32)
-
-        policy_probs = F.softmax(policy_logits, dim=-1)
-        reference_probs = F.softmax(reference_logits, dim=-1)
-        log_policy_probs = F.log_softmax(policy_logits, dim=-1)
-        
-        # KL(P||Q) = Σ P(x) * log(P(x)/Q(x))
-        kl_divergence = policy_probs * (
-            log_policy_probs - torch.log(reference_probs + 1e-10)
-        )
-        kl_divergence = kl_divergence.sum(dim=-1)
-        return kl_divergence
-
-    def compute_policy_loss(self,
+    def sample_init(self,
         context: str,
         messages: List[Dict[str, str]], 
-        policy_old_log_prob: torch.Tensor = torch.tensor(0.0),
         valid: bool = False, 
         output_response: bool = False, 
-    ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        policy_old_log_prob = policy_old_log_prob.to(self.device)
-        
+    ):
         messages_ids = self.policy.chat_template_tokenizer(
             chat_dict=messages, 
-            is_response=False
-        )
-        policy_response, _policy_old_log_prob, response_ids, reference_response, _, _, max_new_tokens = self.get_response(
-            messages_ids=messages_ids, 
-            print_response=False,
         )
 
-        policy_reward = self.compute_reward(
+        policy_response, policy_response_ids, max_new_tokens = self.get_response(
+            messages_ids=messages_ids, 
+            use_prefix=True,
+            print_response=True,
+        )
+        policy_response_logits, policy_hidden_states, policy_seq_old_logp, entropy = self.get_full_forward(
+            messages_ids=messages_ids, 
+            response_ids=policy_response_ids, 
+            use_prefix=True, 
+            valid=valid, 
+        )
+
+        policy_rewards = self.compute_reward(
             context=context, 
             response=policy_response
         )
-        reference_reward = self.compute_reward(
+        log_print('sample_init', f"[{highlight()}] [policy_rewards] {policy_rewards} / {type(policy_rewards)}")
+        # policy_rewards = (policy_rewards - policy_rewards.mean()) / (policy_rewards.std()+1e-8)      # [B]
+        # log_print('sample_init', f"[{highlight()}] [policy_rewards] {policy_rewards} / {type(policy_rewards)}")
+
+        policy_values  = self.value_head(policy_hidden_states)
+        seq_old_values = policy_values[:, -1].detach()  # [B]
+        log_print('sample_init', f"[{highlight()}] [seq_old_values] {seq_old_values} / {type(seq_old_values)}")
+
+        advantages = policy_rewards - seq_old_values  # [B]
+        # advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        log_print('sample_init', f"[{highlight()}] [advantages] {advantages} / {type(advantages)}")
+        
+
+        reference_response, _, _ = self.get_response(
+            messages_ids=messages_ids, 
+            use_prefix=False,
+            print_response=True,
+        )
+        reference_rewards = self.compute_reward(
             context=context, 
             response=reference_response
         )
+        # reference_rewards = (reference_rewards - reference_rewards.mean()) / (reference_rewards.std()+1e-8)      # [B]
+        log_print('sample_init', f"[{highlight()}] [reference_rewards] {reference_rewards} / {type(reference_rewards)}")
+        print()
 
-        self.policy.eval()
-        with torch.no_grad():
-            reference_response_logits, reference_new_log_prob, _ = self.policy.full_forward(
-                messages_ids=messages_ids, 
-                response_ids=response_ids,
-                use_prefix=False,
-                temperature=self.temperature,
-            )
         if valid:
-            self.policy.eval()
-            with torch.no_grad():
-                policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
-                    messages_ids=messages_ids, 
-                    response_ids=response_ids,
-                    use_prefix=True,
-                    temperature=self.temperature,
-                )
+            sample_results = {
+                'policy_seq_old_logp': policy_seq_old_logp,
+                'advantages': advantages,
+                'seq_old_values': seq_old_values,
+                'policy_rewards': policy_rewards,
+                'reference_rewards': reference_rewards,
+
+                'policy_response': policy_response,
+                'reference_response': reference_response,
+            }
         else:
-            self.policy.train()
-            policy_response_logits, policy_new_log_prob, entropy = self.policy.full_forward(
-                messages_ids=messages_ids, 
-                response_ids=response_ids,
-                use_prefix=True,
-                temperature=self.temperature,
-            )
-        
-        total_kl = torch.tensor(0.0, device=self.device)
-        for step_idx in range(response_ids.shape[1]):
-            step_kl = self.compute_stepwise_kl(
-                policy_logits=policy_response_logits[:, step_idx], 
-                reference_logits=reference_response_logits[:, step_idx],
-            )
-            total_kl += step_kl.mean()
-        avg_kl = total_kl / int(response_ids.shape[1])
+            sample_results = {
+                'messages_ids': messages_ids,
+                'policy_response_ids': policy_response_ids,
 
-        kl_loss = self.kl_coef * torch.max(
-            avg_kl - self.max_kl,
-            torch.tensor(0.0, device=self.device)
+                'policy_seq_old_logp': policy_seq_old_logp,
+                'advantages': advantages,
+                'seq_old_values': seq_old_values,
+                'policy_rewards': policy_rewards,
+                'reference_rewards': reference_rewards,
+            }
+        # return full_ids, full_mask, L_g, gen, seq_old_logp, advantages, seq_values, rewards
+        return sample_results
+
+    def compute_policy_loss(self,
+        sample_results: Dict[str, torch.Tensor], 
+        valid: bool = False,
+        output_response: bool = False, 
+    ):
+        # TODO to device 
+        # policy_old_log_prob = policy_old_log_prob.to(self.device)
+        # add value_clip
+
+        policy_response_logits, policy_hidden_states, policy_seq_new_logp, seq_entropy = self.get_full_forward(
+            messages_ids=sample_results['messages_ids'], 
+            response_ids=sample_results['policy_response_ids'], 
+            use_prefix=True, 
+            valid=valid, 
         )
+        entropy_loss = - self.entropy_coef * seq_entropy
+        log_print('compute_policy_loss', f"[{highlight()}] [entropy_loss] {entropy_loss} / {type(entropy_loss)}")
 
-        # log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
+        seq_ratio = torch.exp(policy_seq_new_logp - sample_results['policy_seq_old_logp'])  # [B]
 
-        # policy_new_log_prob = policy_new_log_prob / 2 - 1.3
-        # policy_old_log_prob = reference_new_log_prob
-        reward = policy_reward - reference_reward + 1e-5
+        surr1 = seq_ratio * sample_results['advantages']
+        surr2 = torch.clamp(
+            seq_ratio, 
+            1.0 - self.clip_epsilon, 
+            1.0 + self.clip_epsilon
+        ) * sample_results['advantages']
+        pg_loss = -torch.min(surr1, surr2).mean()
+        log_print('compute_policy_loss', f"[{highlight()}] [pg_loss] {pg_loss} / {type(pg_loss)}")
 
-        log_print(self.state_name, f"[{highlight()}] policy_new_log_prob:{policy_new_log_prob} / policy_old_log_prob:{policy_old_log_prob}")
-        ratio = torch.exp(policy_new_log_prob - policy_old_log_prob)
-        reward_tensor = torch.tensor(reward, device=self.device)
-        surr1 = ratio * reward_tensor
-        surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * reward_tensor
-        policy_loss = -torch.min(surr1, surr2)
-        log_print(self.state_name, f"[{highlight()}] surr1:{surr1} / surr2:{surr2} / policy_loss:{policy_loss}")
 
-        entropy_loss = -self.entropy_coef * entropy
-        
-        total_loss = policy_loss + entropy_loss + kl_loss
+        # policy_hidden_states = policy_hidden_states[-1][:, -1]  # [B, D]
+        seq_new_values = self.value_head.net(policy_hidden_states)  # [B, 1]
+        seq_new_values = seq_new_values.squeeze(-1)  # [B]
 
-        metrics = self.update_metrics(
-            max_new_tokens=max_new_tokens,
-            policy_reward=policy_reward,
-            reference_reward=reference_reward,
-            policy_old_log_prob=policy_old_log_prob.item(),
-            policy_new_log_prob=policy_new_log_prob.item(),
-            ratio=ratio.item(),
-            avg_kl=avg_kl.item(),
-            policy_loss=policy_loss.item(),
-            kl_loss=kl_loss.item(),
-            entropy_loss=entropy_loss.item(),
-            total_loss=total_loss.item(),
-            messages_ids=messages_ids,
-            policy_response=policy_response,
-            reference_response=reference_response,
-            output_response=output_response,
+        seq_values_clipped = sample_results['seq_old_values'] + torch.clamp(
+            seq_new_values - sample_results['seq_old_values'], 
+            -self.value_clip, 
+            self.value_clip
         )
+        vf_loss1 = (seq_new_values - sample_results['policy_rewards']) ** 2
+        vf_loss2 = (seq_values_clipped - sample_results['policy_rewards']) ** 2
+        vf_loss = self.vf_coef * torch.max(vf_loss1, vf_loss2).mean()
+        log_print('compute_policy_loss', f"[{highlight()}] [vf_loss] {vf_loss} / {type(vf_loss)}")
 
-        return total_loss, policy_new_log_prob, metrics
+
+        reference_response_logits, _, reference_seq_new_logp, _ = self.get_full_forward(
+            messages_ids=sample_results['messages_ids'], 
+            response_ids=sample_results['policy_response_ids'],
+            use_prefix=False,
+            valid=valid, 
+        )
+        
+        seq_kl = policy_seq_new_logp - reference_seq_new_logp  # [B]
+        kl_loss = seq_kl.mean()
+        kl_loss = self.kl_coef * kl_loss
+        log_print('compute_policy_loss', f"[{highlight()}] [kl_loss] {kl_loss} / {type(kl_loss)}")
+
+        total_loss = pg_loss + vf_loss + kl_loss + entropy_loss
+        log_print('compute_policy_loss', f"[{highlight()}] [total_loss] {total_loss} / {type(total_loss)}")
+        print()
+
+        metrics = {
+            'pg_loss': pg_loss.item(),
+            'vf_loss': vf_loss.item(),
+            'kl_loss': kl_loss.item(),
+            'entropy_loss': seq_entropy.item(),
+            'total_loss': total_loss.item(),
+            'policy_seq_old_logp': sample_results['policy_seq_old_logp'],
+            'advantages': sample_results['advantages'],
+            'seq_old_values': sample_results['seq_old_values'],
+            'policy_rewards': sample_results['policy_rewards']
+        }
+        # metrics = self.update_metrics(
+        #     max_new_tokens=max_new_tokens,
+        #     policy_reward=policy_reward,
+        #     reference_reward=reference_reward,
+        #     policy_old_log_prob=policy_old_log_prob.item(),
+        #     policy_new_log_prob=policy_new_log_prob.item(),
+        #     ratio=ratio.item(),
+        #     avg_kl=avg_kl.item(),
+        #     policy_loss=policy_loss.item(),
+        #     kl_loss=kl_loss.item(),
+        #     entropy_loss=entropy_loss.item(),
+        #     total_loss=total_loss.item(),
+        #     messages_ids=messages_ids,
+        #     policy_response=policy_response,
+        #     reference_response=reference_response,
+        #     output_response=output_response,
+        # )
+
+        return total_loss, metrics
     
     def update_metrics(self,
         max_new_tokens: int,

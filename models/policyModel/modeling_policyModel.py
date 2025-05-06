@@ -2,13 +2,14 @@
  Copyright (c) 2025, yasaisen(clover).
  All rights reserved.
 
- last modified in 2504092234
+ last modified in 2505061628
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from typing import List, Tuple, Dict
 import os
 
 from ...common.utils import log_print, get_trainable_params, highlight, highlight_show
@@ -42,6 +43,10 @@ class PrefixTuningPolicyModel(nn.Module):
             log_print(self.state_name, f"pad_token=None")
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.base_model.config.gradient_checkpointing = gradient_checkpointing
+
+        self.prefix_check_ids = [2, 105, 2364, 107, 7617, 108, 3041, 106, 107]
+        self.prefix_check_tensor_len = len(self.prefix_check_ids)
+        self.prefix_lock_idx = 4
 
         # 3) Prefix-tuning parameters
         if prefix_prompt is not None:
@@ -90,7 +95,6 @@ class PrefixTuningPolicyModel(nn.Module):
     ):
         self.eval()
         generated_ids = []
-        token_log_probs = []
         
         for _ in range(max_new_tokens):
             input_ids = torch.cat([messages_ids, torch.tensor([generated_ids], dtype=torch.long, device=self.device)], dim=1)
@@ -98,6 +102,7 @@ class PrefixTuningPolicyModel(nn.Module):
                 logits = self(
                     input_ids=input_ids, 
                     use_prefix=use_prefix,
+                    output_hidden_states=False,
                     stage='decode',
                 )
             next_token_logits = logits[0, -1, :]
@@ -105,26 +110,15 @@ class PrefixTuningPolicyModel(nn.Module):
             
             # greedy search
             next_token_id = torch.argmax(log_probs, dim=-1).item()
-            token_log_prob = log_probs[next_token_id]
-            
             generated_ids.append(next_token_id)
-            token_log_probs.append(token_log_prob)
             
             if next_token_id == self.tokenizer.eos_token_id:
                 break
                 
         response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
-
-        token_log_probs = torch.stack(token_log_probs, dim=0)
-        # log_print(self.state_name, f"[{highlight()}] [generate_response] max: {token_log_probs.shape}")
-        # log_print(self.state_name, f"[{highlight()}] [generate_response] max: {token_log_probs.max().item()} min: {token_log_probs.min().item()} mean: {token_log_probs.mean().item()} std: {token_log_probs.std().item()}")
-        token_log_probs = F.normalize(token_log_probs, p=2, dim=0)
-        # log_print(self.state_name, f"[{highlight()}] [generate_response] max: {token_log_probs.max().item()} min: {token_log_probs.min().item()} mean: {token_log_probs.mean().item()} std: {token_log_probs.std().item()}")
-        old_log_prob = token_log_probs.sum()
-
         generated_ids = torch.tensor(generated_ids, dtype=torch.long, device=self.device).unsqueeze(0)
         
-        return response, old_log_prob, generated_ids # , token_log_probs
+        return response, generated_ids
 
     def full_forward(self, 
         messages_ids: torch.Tensor,
@@ -135,49 +129,43 @@ class PrefixTuningPolicyModel(nn.Module):
         combined_ids = torch.cat([messages_ids, response_ids], dim=1)
         # highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
 
-        logits = self(
+        logits, hidden_states = self(
             input_ids=combined_ids, 
             use_prefix=use_prefix,
+            output_hidden_states=True,
         )
-        response_logits = logits[:, -response_ids.shape[1]:] 
-        log_probs = F.log_softmax(response_logits / temperature, dim=-1)
+        response_logits = logits[:, -response_ids.shape[1]:]
         
-        token_log_probs = torch.gather(
-            log_probs,
-            -1,
-            response_ids.unsqueeze(-1)
-        ).squeeze()
-        # log_print(self.state_name, f"[{highlight()}] [full_forward] max: {token_log_probs.shape}")
-        # log_print(self.state_name, f"[{highlight()}] [full_forward] max: {token_log_probs.max().item()} min: {token_log_probs.min().item()} mean: {token_log_probs.mean().item()} std: {token_log_probs.std().item()}")
-        token_log_probs = F.normalize(token_log_probs, p=2, dim=0)
-        # log_print(self.state_name, f"[{highlight()}] [full_forward] max: {token_log_probs.max().item()} min: {token_log_probs.min().item()} mean: {token_log_probs.mean().item()} std: {token_log_probs.std().item()}")
-        new_log_prob = token_log_probs.sum()
+        logp_gen = F.log_softmax(response_logits / temperature, dim=-1)
+        old_logp = logp_gen.gather(
+            -1, response_ids.unsqueeze(-1)
+        ).squeeze(-1).detach()                  # [B, L_g]
+        seq_old_logp = old_logp.sum(dim=1)      # [B]
 
-        probs = torch.exp(log_probs)
-        entropy = -(probs * log_probs).sum(dim=-1).mean()
+        probs = torch.exp(logp_gen)
+        entropy = -(probs * logp_gen).sum(dim=-1).mean()
 
-        return response_logits, new_log_prob, entropy #, token_log_probs
+        return response_logits, hidden_states, seq_old_logp, entropy
 
     def forward(self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
+        output_hidden_states: bool = False,
         stage: str = '',
     ):
         # highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
 
-        # template_start = torch.tensor([[     2,    106,   1645,    108]], dtype=torch.long).to(self.device) # user
-        template_start = torch.tensor([[     2,    106,   9020,    108]], dtype=torch.long).to(self.device) # system
-        template_end = torch.tensor([[   107,    108]], dtype=torch.long).to(self.device)
+        template_start = torch.tensor([self.prefix_check_ids[:self.prefix_lock_idx]], dtype=torch.long).to(self.device) # system
+        template_end = torch.tensor([self.prefix_check_ids[self.prefix_lock_idx + 1:]], dtype=torch.long).to(self.device)
         template_start_len = int(template_start.shape[1])
         template_end_len = int(template_end.shape[1])
 
-        # kill first [     2,    106,   (1645),    108,   (3940),    107,    108] tokens
-        check_tensor = torch.tensor([[     2,    106,   1645,    108,   3940,    107,    108]], dtype=torch.long).to(self.device)
-        if not torch.equal(input_ids[:, :7], check_tensor):
+        check_tensor = torch.tensor([self.prefix_check_ids], dtype=torch.long).to(self.device)
+        if not torch.equal(input_ids[:, :self.prefix_check_tensor_len], check_tensor):
             raise ValueError(f"Input input_ids with not prefix [\n{self.tokenizer.decode(check_tensor.tolist()[0], skip_special_tokens=False)}\n] but [\n{self.tokenizer.decode(input_ids[:, :7].tolist()[0], skip_special_tokens=False)}\n]")
         
-        cutted_input_ids = input_ids[:, 7:]
+        cutted_input_ids = input_ids[:, self.prefix_check_tensor_len:]
         batch_size, seq_len = cutted_input_ids.shape
         if attention_mask is None:
             attention_mask = torch.ones(
@@ -217,19 +205,40 @@ class PrefixTuningPolicyModel(nn.Module):
         hidden_states = transformer_outputs.last_hidden_state
         logits = self.base_model.lm_head(hidden_states)
         
-        return logits
+        if output_hidden_states:
+            return logits, hidden_states
+        else:
+            return logits
 
     def chat_template_tokenizer(self, 
-            chat_dict, 
-            is_response:bool = False,
+            chat_dict: List[Dict[str, str]], 
         ):
+        messages = [
+            [
+                {
+                    "role": "system",
+                    "content": [{"type": "text", "text": "temp"},]
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "start"},]
+                }
+            ] + chat_dict
+        ]
 
-        if is_response:
-            chat_dict = [{'role': 'assistant', 'content': chat_dict}]
-        
-        chat_dict = [{'role': 'user', 'content': 'temp'}] + chat_dict
-        prompt = self.tokenizer.apply_chat_template(chat_dict, tokenize=False, add_generation_prompt=True)
-        input_ids = self.tokenizer.encode(prompt, add_special_tokens=False, return_tensors="pt").to(torch.long).to(self.device)
+        inputs = self.tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+
+        inputs = {
+            k: (v.to(torch.bfloat16) if k != "input_ids" else v).to(self.device)
+            for k, v in inputs.items()
+        }
+        input_ids = inputs["input_ids"]
 
         if input_ids.shape[1] > self.max_length:
             raise ValueError(f"Input length {input_ids.shape[1]} exceeds max_length {self.max_length}")
