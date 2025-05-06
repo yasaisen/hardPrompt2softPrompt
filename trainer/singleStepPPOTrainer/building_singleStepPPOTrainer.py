@@ -154,6 +154,22 @@ class SingleStepPPOTrainer:
 
         return response_logits, hidden_states, seq_old_logp, entropy
         
+    def get_seq_values(self,
+        hidden_states: torch.Tensor, 
+        valid: bool, 
+    ):
+        if not valid:
+            self.value_head.train()
+            policy_values  = self.value_head(hidden_states)
+            seq_old_values = policy_values[:, -1].detach()  # [B]
+        else:
+            self.value_head.eval()
+            with torch.no_grad():
+                policy_values  = self.value_head(hidden_states)
+                seq_old_values = policy_values[:, -1].detach()  # [B]
+
+        return seq_old_values
+
     def compute_reward(self, 
         context: str, 
         response: str
@@ -188,12 +204,18 @@ class SingleStepPPOTrainer:
         policy_response, policy_response_ids, max_new_tokens = self.get_response(
             messages_ids=messages_ids, 
             use_prefix=True,
-            print_response=True,
+            print_response=False,
         )
-        policy_response_logits, policy_hidden_states, policy_seq_old_logp, entropy = self.get_full_forward(
+        _, policy_hidden_states, policy_seq_old_logp, entropy = self.get_full_forward(
             messages_ids=messages_ids, 
             response_ids=policy_response_ids, 
             use_prefix=True, 
+            valid=valid, 
+        )
+        _, _, reference_seq_new_logp, _ = self.get_full_forward(
+            messages_ids=messages_ids, 
+            response_ids=policy_response_ids,
+            use_prefix=False,
             valid=valid, 
         )
 
@@ -205,8 +227,10 @@ class SingleStepPPOTrainer:
         # policy_rewards = (policy_rewards - policy_rewards.mean()) / (policy_rewards.std()+1e-8)      # [B]
         # log_print('sample_init', f"[{highlight()}] [policy_rewards] {policy_rewards} / {type(policy_rewards)}")
 
-        policy_values  = self.value_head(policy_hidden_states)
-        seq_old_values = policy_values[:, -1].detach()  # [B]
+        seq_old_values = self.get_seq_values(
+            hidden_states=policy_hidden_states, 
+            valid=valid
+        )
         log_print('sample_init', f"[{highlight()}] [seq_old_values] {seq_old_values} / {type(seq_old_values)}")
 
         advantages = policy_rewards - seq_old_values  # [B]
@@ -217,7 +241,7 @@ class SingleStepPPOTrainer:
         reference_response, _, _ = self.get_response(
             messages_ids=messages_ids, 
             use_prefix=False,
-            print_response=True,
+            print_response=False,
         )
         reference_rewards = self.compute_reward(
             context=context, 
@@ -230,6 +254,7 @@ class SingleStepPPOTrainer:
         if valid:
             sample_results = {
                 'policy_seq_old_logp': policy_seq_old_logp,
+                'reference_seq_new_logp': reference_seq_new_logp,
                 'advantages': advantages,
                 'seq_old_values': seq_old_values,
                 'policy_rewards': policy_rewards,
@@ -244,6 +269,7 @@ class SingleStepPPOTrainer:
                 'policy_response_ids': policy_response_ids,
 
                 'policy_seq_old_logp': policy_seq_old_logp,
+                'reference_seq_new_logp': reference_seq_new_logp,
                 'advantages': advantages,
                 'seq_old_values': seq_old_values,
                 'policy_rewards': policy_rewards,
@@ -270,8 +296,8 @@ class SingleStepPPOTrainer:
         entropy_loss = - self.entropy_coef * seq_entropy
         log_print('compute_policy_loss', f"[{highlight()}] [entropy_loss] {entropy_loss} / {type(entropy_loss)}")
 
-        seq_ratio = torch.exp(policy_seq_new_logp - sample_results['policy_seq_old_logp'])  # [B]
 
+        seq_ratio = torch.exp(policy_seq_new_logp - sample_results['policy_seq_old_logp'])  # [B]
         surr1 = seq_ratio * sample_results['advantages']
         surr2 = torch.clamp(
             seq_ratio, 
@@ -283,9 +309,10 @@ class SingleStepPPOTrainer:
 
 
         # policy_hidden_states = policy_hidden_states[-1][:, -1]  # [B, D]
-        seq_new_values = self.value_head.net(policy_hidden_states)  # [B, 1]
-        seq_new_values = seq_new_values.squeeze(-1)  # [B]
-
+        seq_new_values = self.get_seq_values(
+            hidden_states=policy_hidden_states, 
+            valid=valid
+        )
         seq_values_clipped = sample_results['seq_old_values'] + torch.clamp(
             seq_new_values - sample_results['seq_old_values'], 
             -self.value_clip, 
@@ -296,18 +323,12 @@ class SingleStepPPOTrainer:
         vf_loss = self.vf_coef * torch.max(vf_loss1, vf_loss2).mean()
         log_print('compute_policy_loss', f"[{highlight()}] [vf_loss] {vf_loss} / {type(vf_loss)}")
 
-
-        reference_response_logits, _, reference_seq_new_logp, _ = self.get_full_forward(
-            messages_ids=sample_results['messages_ids'], 
-            response_ids=sample_results['policy_response_ids'],
-            use_prefix=False,
-            valid=valid, 
-        )
         
-        seq_kl = policy_seq_new_logp - reference_seq_new_logp  # [B]
+        seq_kl = policy_seq_new_logp - sample_results['reference_seq_new_logp']  # [B]
         kl_loss = seq_kl.mean()
         kl_loss = self.kl_coef * kl_loss
         log_print('compute_policy_loss', f"[{highlight()}] [kl_loss] {kl_loss} / {type(kl_loss)}")
+
 
         total_loss = pg_loss + vf_loss + kl_loss + entropy_loss
         log_print('compute_policy_loss', f"[{highlight()}] [total_loss] {total_loss} / {type(total_loss)}")
