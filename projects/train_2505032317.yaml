@@ -22,7 +22,7 @@ dataset:
 
 task:
   root_path: ""
-  num_epoch: 10
+  num_epoch: 100
   batch_size: 32
   sample_loop: 8
   learning_rate: 1e-4
@@ -36,6 +36,8 @@ task:
   kl_coef: 0.4
   max_grad_norm: 1.0
   max_kl: 0.1
+  value_clip: 0.2
+  vf_coef: 0.3
   
   max_token_len: 500
   temperature: 1.0
