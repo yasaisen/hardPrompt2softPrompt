@@ -208,7 +208,9 @@ def plot_data_list(
     title:str=None,
     ymin:int=None,
     ymax:int=None,
+    smoothed:bool=True,
     window_size:int=51,
+    save:str=None,
 ):
     if diff_list is not None:
         key_list = ['diff']
@@ -223,7 +225,8 @@ def plot_data_list(
     plt.figure(figsize=(15, 7))
     for key in key_list:
         plt.plot(x_axis, data_list[key][data_min:data_max], marker='o', label=key)
-    plt.plot(smoothed_steps, smoothed_values, label=f'Smoothed', color='red', linewidth=2)
+    if smoothed:
+        plt.plot(smoothed_steps, smoothed_values, label=f'Smoothed', color='red', linewidth=2)
 
     plt.xlabel("Step")
     plt.ylabel("Value")
@@ -236,6 +239,8 @@ def plot_data_list(
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
+    if save is not None:
+        plt.savefig(os.path.join(os.getcwd(), save + '.png'))
     plt.show()
 
 

@@ -249,7 +249,7 @@ class SingleStepPPOTrainer:
 
         seq_old_values = self.get_seq_values(
             hidden_states=policy_hidden_states, 
-            valid=valid
+            valid=True
         )
         log_print('sample_init', f"[{highlight()}] [seq_old_values] {seq_old_values} / {type(seq_old_values)}")
 
@@ -318,20 +318,14 @@ class SingleStepPPOTrainer:
         entropy_loss = - self.entropy_coef * seq_entropy
         log_print('compute_policy_loss', f"[{highlight()}] [entropy_loss] {entropy_loss} / {type(entropy_loss)}")
 
-        log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [policy_seq_new_logp] {policy_seq_new_logp} / {type(policy_seq_new_logp)}")
-        log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [sample_results['policy_seq_old_logp']] {sample_results['policy_seq_old_logp']} / {type(sample_results['policy_seq_old_logp'])}")
         seq_len = sample_results['policy_response_ids'].shape[1]
         seq_ratio = torch.exp((policy_seq_new_logp - sample_results['policy_seq_old_logp']) / seq_len)  # [B]
-        log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [seq_ratio] {seq_ratio} / {type(seq_ratio)}")
-        log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [sample_results['advantages']] {sample_results['advantages']} / {type(sample_results['advantages'])}")
         pg_surr1 = seq_ratio * sample_results['advantages']
-        log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [pg_surr1] {pg_surr1} / {type(pg_surr1)}")
         pg_surr2 = torch.clamp(
             seq_ratio, 
             1.0 - self.clip_epsilon, 
             1.0 + self.clip_epsilon
         ) * sample_results['advantages']
-        log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [pg_surr2] {pg_surr2} / {type(pg_surr2)}")
         pg_loss = -torch.min(pg_surr1, pg_surr2).mean()
         log_print('compute_policy_loss', f"[{highlight()}] [pg_loss] {pg_loss} / {type(pg_loss)}")
 
