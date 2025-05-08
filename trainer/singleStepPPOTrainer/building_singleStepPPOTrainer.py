@@ -287,7 +287,7 @@ class SingleStepPPOTrainer:
         else:
             sample_results = None       
         metrics = {
-            'state': 'warmUp',
+            'state': 'valid' if valid else 'warmUp',
 
             'policy_seq_old_logp': policy_seq_old_logp.item(),
             'reference_seq_new_logp': reference_seq_new_logp.item(),
@@ -296,7 +296,7 @@ class SingleStepPPOTrainer:
             'policy_rewards': policy_rewards.item(),
             'reference_rewards': reference_rewards.item(),
 
-            'messages': str(messages),
+            'context_messages': str(messages),
             'policy_response': str(policy_response),
             'reference_response': str(reference_response),
         }
@@ -320,7 +320,8 @@ class SingleStepPPOTrainer:
 
         log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [policy_seq_new_logp] {policy_seq_new_logp} / {type(policy_seq_new_logp)}")
         log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [sample_results['policy_seq_old_logp']] {sample_results['policy_seq_old_logp']} / {type(sample_results['policy_seq_old_logp'])}")
-        seq_ratio = torch.exp(policy_seq_new_logp - sample_results['policy_seq_old_logp'])  # [B]
+        seq_len = sample_results['policy_response_ids'].shape[1]
+        seq_ratio = torch.exp((policy_seq_new_logp - sample_results['policy_seq_old_logp']) / seq_len)  # [B]
         log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [seq_ratio] {seq_ratio} / {type(seq_ratio)}")
         log_print('compute_policy_loss', f"[{highlight('pg_loss')}] [sample_results['advantages']] {sample_results['advantages']} / {type(sample_results['advantages'])}")
         pg_surr1 = seq_ratio * sample_results['advantages']
