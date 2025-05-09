@@ -1,7 +1,7 @@
   # Copyright (c) 2025, yasaisen.
   # All rights reserved.
   # 
-  # last modified in 2504111145
+  # last modified in 2505090231
 
 model:
   reward_model:
@@ -24,8 +24,8 @@ task:
   root_path: ""
   num_epoch: 30
   batch_size: 32
-  sample_loop: 12
-  learning_rate: 5e-2
+  sample_loop: 3
+  learning_rate: 1e-3
   weight_decay: 1e-4
   max_lr: 1e-3
   pct_start: 0.2
@@ -33,9 +33,9 @@ task:
   
   clip_epsilon: 0.2
   entropy_coef: 0.03
-  kl_coef: 0.4
+  kl_coef: 0.5
   max_grad_norm: 1.0
-  max_kl: 0.1
+  max_kl: 0.05
   value_clip: 0.2
   vf_coef: 0.3
   
