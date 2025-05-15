@@ -1,2 +1,2 @@
 # hardPrompt2softPrompt
-do single step PPO on gemma-7b-it with prefix tuning
+do PPO on gemma-it based with prefix tuning
