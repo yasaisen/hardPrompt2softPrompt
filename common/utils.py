@@ -220,13 +220,17 @@ def plot_data_list(
     data_len = len(data_list[key_list[0]][data_min:data_max])
     smoothed_values = moving_average(data_list[key_list[0]][data_min:data_max], window_size)
     smoothed_steps = list(range(1 + window_size // 2, data_len - window_size // 2 + 1))
-    x_axis = list(range(1, data_len + 1))
+    x_axis = list(range(0, data_len))
 
     plt.figure(figsize=(15, 7))
     for key in key_list:
         plt.plot(x_axis, data_list[key][data_min:data_max], marker='o', label=key)
     if smoothed:
         plt.plot(smoothed_steps, smoothed_values, label=f'Smoothed', color='red', linewidth=2)
+    if diff_list is not None:
+        ymax = plt.ylim()[1]
+        ymin = plt.ylim()[0]
+        plt.axhspan(ymin=ymin, ymax=0, facecolor='red', alpha=0.2)
 
     plt.xlabel("Step")
     plt.ylabel("Value")
@@ -236,6 +240,7 @@ def plot_data_list(
     plt.xlim(0, data_len)
     if ymax is not None and ymin is not None:
         plt.ylim(ymin, ymax)
+
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
