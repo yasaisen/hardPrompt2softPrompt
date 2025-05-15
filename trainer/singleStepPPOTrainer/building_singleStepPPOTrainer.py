@@ -475,7 +475,7 @@ class SingleStepPPOTrainer:
         pct_start = float(trainer_cfg.get("pct_start"))
         anneal_strategy = str(trainer_cfg.get("anneal_strategy"))
 
-        model = cls(
+        trainer = cls(
             policy_model=policy_model,
             reward_model=reward_model,
 
@@ -499,7 +499,7 @@ class SingleStepPPOTrainer:
 
             device=device,
         )
-        return model
+        return trainer
     
 
 

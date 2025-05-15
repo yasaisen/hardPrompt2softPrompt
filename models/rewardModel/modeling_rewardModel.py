@@ -154,7 +154,10 @@ class ComparativeRewardModel(nn.Module):
 
         if cfg['model'].get('reward_model') is not None:
             reward_model_cfg = cfg['model']['reward_model']
-            reward_model_path = os.path.join(root_path, reward_model_cfg.get("reward_model_path"))
+            if reward_model_cfg.get("reward_model_path") is not None:
+                reward_model_path = os.path.join(root_path, reward_model_cfg.get("reward_model_path"))
+            else:
+                reward_model_path = None
             bert_name = str(reward_model_cfg.get("bert_name"))
             prefix_length = int(reward_model_cfg.get("prefix_length"))
             PPO_mode = bool(reward_model_cfg.get("PPO_mode"))
