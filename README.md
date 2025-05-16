@@ -8,7 +8,7 @@ conda activate hard2softPPO
 pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 pip install transformers==4.51.3
 ```
-
+[weight](https://drive.google.com/file/d/1i_N8qQfAs5iRxYsYPYB6m_zCtRESzItD/view?usp=sharing)
 ```python
 from hardPrompt2softPrompt.models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 
