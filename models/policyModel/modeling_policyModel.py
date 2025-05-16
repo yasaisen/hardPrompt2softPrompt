@@ -66,8 +66,10 @@ class PrefixTuningPolicyModel(nn.Module):
         if pretrain_path is not None:
             log_print(self.state_name, f"pretrain_path={pretrain_path}")
             ckpt = torch.load(pretrain_path)
-            ### TODO: model save
             self.prefix_embeddings = nn.Parameter(ckpt['prefix_embeddings_state_dict'])
+            self.prefix_length = int(self.prefix_embeddings.shape[0])
+            self.prefix_ids = torch.tensor([[108] * self.prefix_length], dtype=torch.long).to(self.device)
+            self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
             log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}")
         
         # self.prefix_embeddings = nn.Parameter(torch.randn(prefix_length, self.hidden_size, dtype=torch_dtype, device=self.device))
@@ -91,7 +93,8 @@ class PrefixTuningPolicyModel(nn.Module):
         messages_ids: torch.Tensor, 
         max_new_tokens: int = 50, 
         use_prefix: bool = True,
-        temperature: float = 1.0
+        temperature: float = 1.0,
+        prefix_checker: bool = True,
     ):
         self.eval()
         generated_ids = []
@@ -103,6 +106,7 @@ class PrefixTuningPolicyModel(nn.Module):
                     input_ids=input_ids, 
                     use_prefix=use_prefix,
                     output_hidden_states=False,
+                    prefix_checker=prefix_checker,
                     stage='decode',
                 )
             next_token_logits = logits[0, -1, :]
@@ -152,6 +156,7 @@ class PrefixTuningPolicyModel(nn.Module):
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
         output_hidden_states: bool = False,
+        prefix_checker: bool = True,
         stage: str = '',
     ):
         # highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
@@ -162,7 +167,7 @@ class PrefixTuningPolicyModel(nn.Module):
         template_end_len = int(template_end.shape[1])
 
         check_tensor = torch.tensor([self.prefix_check_ids], dtype=torch.long).to(self.device)
-        if not torch.equal(input_ids[:, :self.prefix_check_tensor_len], check_tensor):
+        if prefix_checker and not torch.equal(input_ids[:, :self.prefix_check_tensor_len], check_tensor):
             raise ValueError(f"Input input_ids with not prefix [\n{self.tokenizer.decode(check_tensor.tolist()[0], skip_special_tokens=False)}\n] but [\n{self.tokenizer.decode(input_ids[:, :7].tolist()[0], skip_special_tokens=False)}\n]")
         
         cutted_input_ids = input_ids[:, self.prefix_check_tensor_len:]
@@ -211,7 +216,8 @@ class PrefixTuningPolicyModel(nn.Module):
             return logits
 
     def chat_template_tokenizer(self, 
-            chat_dict: List[Dict[str, str]], 
+            chat_dict: List[Dict[str, str]] = [], 
+            first_context: str = 'start',
         ):
         messages = [
             [
@@ -221,7 +227,7 @@ class PrefixTuningPolicyModel(nn.Module):
                 },
                 {
                     "role": "user",
-                    "content": [{"type": "text", "text": "start"},]
+                    "content": [{"type": "text", "text": first_context},]
                 }
             ] + chat_dict
         ]
