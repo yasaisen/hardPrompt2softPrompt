@@ -71,11 +71,8 @@ class PrefixTuningPolicyModel(nn.Module):
             self.prefix_prompt = prefix_prompt
             self.prefix_ids = self.tokenizer.encode(self.prefix_prompt, add_special_tokens=False, return_tensors="pt").to(torch.long)
             self.prefix_length = int(self.prefix_ids.shape[1])
-            if self.model_name == 'google/gemma-3-1b-it':
-                self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
-
-            elif self.model_name == 'google/gemma-3-4b-it':
-                self.max_length = self.tokenizer.model_max_length - self.prefix_length
+            # self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
+            self.max_length = self.tokenizer.model_max_length - self.prefix_length
                 
             self.hidden_size = self.base_model.config.hidden_size
             word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
