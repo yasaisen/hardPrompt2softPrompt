@@ -61,7 +61,8 @@ class PrefixTuningPolicyModel(nn.Module):
             self.prefix_prompt = prefix_prompt
             self.prefix_ids = self.tokenizer.encode(self.prefix_prompt, add_special_tokens=False, return_tensors="pt").to(torch.long)
             self.prefix_length = int(self.prefix_ids.shape[1])
-            self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
+            # self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
+            self.max_length = self.tokenizer.model_max_length - self.prefix_length
             self.hidden_size = self.base_model.config.hidden_size
 
             word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
@@ -74,7 +75,8 @@ class PrefixTuningPolicyModel(nn.Module):
             self.prefix_embeddings = nn.Parameter(ckpt['prefix_embeddings_state_dict'])
             self.prefix_length = int(self.prefix_embeddings.shape[0])
             self.prefix_ids = torch.tensor([[108] * self.prefix_length], dtype=torch.long).to(self.device)
-            self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
+            # self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
+            self.max_length = self.tokenizer.model_max_length - self.prefix_length
             log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}", silent)
 
         log_print(self.state_name, f"max_length={self.max_length}", silent)
