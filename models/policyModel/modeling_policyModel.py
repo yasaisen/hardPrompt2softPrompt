@@ -5,7 +5,7 @@
  This file is part of a project licensed under the MIT License.
  See the LICENSE file in the project root for more information.
  
- last modified in 2506111202
+ last modified in 2506111354
 """
 
 import torch
@@ -16,6 +16,11 @@ from typing import List, Tuple, Dict
 import os
 
 from ...common.utils import log_print, get_trainable_params, highlight, highlight_show
+
+
+WEIGHT_MAPPING_DICT = {
+    'google/gemma-3-1b-it': 'hard2softModel_v1.0_2505142356.pth', 
+}
 
 
 class PrefixTuningPolicyModel(nn.Module):
@@ -65,7 +70,7 @@ class PrefixTuningPolicyModel(nn.Module):
 
         if pretrain_path is not None:
             log_print(self.state_name, f"pretrain_path={pretrain_path}", silent)
-            ckpt = torch.load(pretrain_path)
+            ckpt = torch.load(pretrain_path, weights_only=True)
             self.prefix_embeddings = nn.Parameter(ckpt['prefix_embeddings_state_dict'])
             self.prefix_length = int(self.prefix_embeddings.shape[0])
             self.prefix_ids = torch.tensor([[108] * self.prefix_length], dtype=torch.long).to(self.device)
@@ -301,10 +306,10 @@ class PrefixTuningPolicyModel(nn.Module):
             from huggingface_hub import hf_hub_download
             ckpt_path = hf_hub_download(
                 repo_id   = 'yasaisen/hardPrompt2softPrompt',
-                filename  = 'hard2softModel_v1.0_2505142356.pth',
+                filename  = WEIGHT_MAPPING_DICT[model_name],
                 # revision  = revision,
-                # cache_dir = cache_dir,   # 可不給，預設走 HF_HOME
-                resume_download = True,  # 斷線續傳
+                # cache_dir = cache_dir, 
+                # resume_download = True, 
             )
 
         model = cls(
