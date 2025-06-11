@@ -1,8 +1,11 @@
 """
- Copyright (c) 2025, yasaisen(clover).
- All rights reserved.
-
- last modified in 2505061628
+ SPDX-License-Identifier: MIT
+ Copyright (c) 2025, yasaisen (clover)
+ 
+ This file is part of a project licensed under the MIT License.
+ See the LICENSE file in the project root for more information.
+ 
+ last modified in 2506111202
 """
 
 import torch
@@ -18,21 +21,21 @@ from ...common.utils import log_print, get_trainable_params, highlight, highligh
 class PrefixTuningPolicyModel(nn.Module):
     def __init__(self, 
         model_name: str, 
-        prefix_prompt: str=None, 
-        pretrain_path=None, 
-        gradient_checkpointing: bool=False,
-        device: str="cuda", 
-        torch_dtype=torch.float32
+        prefix_prompt: str = None, 
+        pretrain_path: str = None, 
+        gradient_checkpointing: bool = False,
+        device: str = "cuda", 
+        torch_dtype = torch.float32,
+        silent: bool = True,
     ):
         super().__init__()
         self.state_name = 'PrefixTuningPolicyModel'
         self.device = device
-        print()
-        log_print(self.state_name, f"Building...")
+        # print()
+        log_print(self.state_name, f"Building...", silent)
 
         self.torch_dtype = torch_dtype
 
-        # 1) Load pretrained GPT
         self.base_model = AutoModelForCausalLM.from_pretrained(
             model_name, 
             # attn_implementation="flash_attention_2", 
@@ -40,7 +43,7 @@ class PrefixTuningPolicyModel(nn.Module):
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         if self.tokenizer.pad_token is None:
-            log_print(self.state_name, f"pad_token=None")
+            log_print(self.state_name, f"pad_token=None", silent)
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self.base_model.config.gradient_checkpointing = gradient_checkpointing
 
@@ -48,53 +51,47 @@ class PrefixTuningPolicyModel(nn.Module):
         self.prefix_check_tensor_len = len(self.prefix_check_ids)
         self.prefix_lock_idx = 4
 
-        # 3) Prefix-tuning parameters
         if prefix_prompt is not None:
-            log_print(self.state_name, f"prefix_prompt={prefix_prompt}")
+            log_print(self.state_name, f"prefix_prompt={prefix_prompt}", silent)
             self.prefix_prompt = prefix_prompt
             self.prefix_ids = self.tokenizer.encode(self.prefix_prompt, add_special_tokens=False, return_tensors="pt").to(torch.long)
             self.prefix_length = int(self.prefix_ids.shape[1])
             self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
             self.hidden_size = self.base_model.config.hidden_size
-            """
-            4-(4+prefix_length)
-            """
+
             word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
             self.prefix_embeddings = nn.Parameter(word_embeds.detach().clone().squeeze(), requires_grad=True)
-            log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}")
+            log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}", silent)
 
         if pretrain_path is not None:
-            log_print(self.state_name, f"pretrain_path={pretrain_path}")
+            log_print(self.state_name, f"pretrain_path={pretrain_path}", silent)
             ckpt = torch.load(pretrain_path)
             self.prefix_embeddings = nn.Parameter(ckpt['prefix_embeddings_state_dict'])
             self.prefix_length = int(self.prefix_embeddings.shape[0])
             self.prefix_ids = torch.tensor([[108] * self.prefix_length], dtype=torch.long).to(self.device)
             self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
-            log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}")
-        
-        # self.prefix_embeddings = nn.Parameter(torch.randn(prefix_length, self.hidden_size, dtype=torch_dtype, device=self.device))
-        # nn.init.normal_(self.prefix_embeddings, mean=0.0, std=0.5)
+            log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}", silent)
 
-        log_print(self.state_name, f"max_length={self.max_length}")
+        log_print(self.state_name, f"max_length={self.max_length}", silent)
 
-        # 2) Freeze all GPT parameters
         for param in self.parameters():
             param.requires_grad = False
         self.prefix_embeddings.requires_grad = True
 
-        log_print(self.state_name, f"requires_grad={sum(p.numel() for p in self.parameters() if p.requires_grad)}")
-        log_print(self.state_name, f"prefix_embeddings={self.prefix_embeddings.numel() if self.prefix_embeddings.requires_grad else 0}")
-        log_print(self.state_name, f"prefix_embeddings={self.prefix_embeddings.shape}")
-        log_print(self.state_name, f"basemodel trainable params: {get_trainable_params(self)}")
-        self.to(self.device) # 
-        log_print(self.state_name, f"...Done\n")
+        log_print(self.state_name, f"requires_grad={sum(p.numel() for p in self.parameters() if p.requires_grad)}", silent)
+        log_print(self.state_name, f"prefix_embeddings={self.prefix_embeddings.numel() if self.prefix_embeddings.requires_grad else 0}", silent)
+        log_print(self.state_name, f"prefix_embeddings={self.prefix_embeddings.shape}", silent)
+        log_print(self.state_name, f"basemodel trainable params: {get_trainable_params(self)}", silent)
+        self.to(self.device)
+        log_print(self.state_name, f"...Done\n", silent)
 
     def generate_response(self, 
         messages_ids: torch.Tensor, 
-        max_new_tokens: int = 50, 
+        max_new_tokens: int = 100, 
         use_prefix: bool = True,
         temperature: float = 1.0,
-        prefix_checker: bool = True,
+        prefix_checker: bool = False, 
+        output_ids: bool = False, 
     ):
         self.eval()
         generated_ids = []
@@ -122,7 +119,10 @@ class PrefixTuningPolicyModel(nn.Module):
         response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         generated_ids = torch.tensor(generated_ids, dtype=torch.long, device=self.device).unsqueeze(0)
         
-        return response, generated_ids
+        if output_ids:
+            return response, generated_ids
+        else:
+            return response
 
     def full_forward(self, 
         messages_ids: torch.Tensor,
@@ -216,24 +216,34 @@ class PrefixTuningPolicyModel(nn.Module):
             return logits
 
     def chat_template_tokenizer(self, 
-            chat_dict: List[Dict[str, str]] = [], 
-            first_context: str = 'start',
+            messages: List[Dict[str, str]] = [], 
+            training_prompt: bool = False,
         ):
-        messages = [
-            [
-                {
-                    "role": "system",
-                    "content": [{"type": "text", "text": "temp"},]
-                },
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": first_context},]
-                }
-            ] + chat_dict
-        ]
+        if training_prompt:
+            msg = [
+                [
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": "temp"},]
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": 'start'},]
+                    }
+                ] + messages
+            ]
+        else:
+            msg = [
+                [
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": "temp"},]
+                    }
+                ] + messages
+            ]
 
         inputs = self.tokenizer.apply_chat_template(
-            messages,
+            msg,
             add_generation_prompt=True,
             tokenize=True,
             return_dict=True,
@@ -281,8 +291,27 @@ class PrefixTuningPolicyModel(nn.Module):
             device=device, 
         )
         return model
-    
 
+    @classmethod
+    def from_pretrained(cls, 
+        model_name: str, 
+        ckpt_path: str = None, 
+    ):
+        if ckpt_path is None or not os.path.isfile(ckpt_path):
+            from huggingface_hub import hf_hub_download
+            ckpt_path = hf_hub_download(
+                repo_id   = 'yasaisen/hardPrompt2softPrompt',
+                filename  = 'hard2softModel_v1.0_2505142356.pth',
+                # revision  = revision,
+                # cache_dir = cache_dir,   # 可不給，預設走 HF_HOME
+                resume_download = True,  # 斷線續傳
+            )
+
+        model = cls(
+            model_name=model_name,
+            pretrain_path=ckpt_path, 
+        )
+        return model
 
 
 

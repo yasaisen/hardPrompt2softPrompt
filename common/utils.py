@@ -1,8 +1,11 @@
 """
- Copyright (c) 2025, yasaisen(clover).
- All rights reserved.
-
- last modified in 2505081702
+ SPDX-License-Identifier: MIT
+ Copyright (c) 2025, yasaisen (clover)
+ 
+ This file is part of a project licensed under the MIT License.
+ See the LICENSE file in the project root for more information.
+ 
+ last modified in 2506111203
 """
 
 import json
@@ -18,8 +21,9 @@ import matplotlib.pyplot as plt
 import os
 
 
-def log_print(state_name, text):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] [{state_name}] {text}")
+def log_print(state_name, text, silent=False):
+    if not silent:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] [{state_name}] {text}")
 
 def checkpath(path):
     if not os.path.exists(path):
@@ -153,9 +157,11 @@ def calu_dict_avg(
 
 def load_result_logs(
     result_log_path: str,
+    epoch_idx=None,
 ) -> dict:
     state_name = 'load_result_logs'
     log_print(state_name, f"Loading from {result_log_path}.log")
+    log_print(state_name, f"filtering epoch_idx {epoch_idx}")
     data = []
     with open(result_log_path + ".log", "r", encoding="utf-8") as f:
         for line in f:
@@ -163,10 +169,18 @@ def load_result_logs(
             if line.startswith("{") and line.endswith("}"):
                 try:
                     d = json.loads(line)
-                    data.append(d)
+                    if epoch_idx is not None:
+                        if d.get('epoch_idx') == epoch_idx:
+                            data.append(d)
+                    else:
+                        data.append(d)
                 except Exception as e:
                     d = eval(line)
-                    data.append(d)
+                    if epoch_idx is not None:
+                        if d.get('epoch_idx') == epoch_idx:
+                            data.append(d)
+                    else:
+                        data.append(d)
     log_print(state_name, f"Number of data: {len(data)}")
 
     unique_states = []

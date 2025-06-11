@@ -1,8 +1,11 @@
 """
- Copyright (c) 2025, yasaisen(clover).
- All rights reserved.
-
- last modified in 2505061628
+ SPDX-License-Identifier: MIT
+ Copyright (c) 2025, yasaisen (clover)
+ 
+ This file is part of a project licensed under the MIT License.
+ See the LICENSE file in the project root for more information.
+ 
+ last modified in 2506111202
 """
 
 import torch
@@ -121,7 +124,9 @@ class SingleStepPPOTrainer:
             messages_ids,
             max_new_tokens=max_new_tokens,
             use_prefix=use_prefix,
-            temperature=self.temperature
+            temperature=self.temperature,
+            prefix_checker=True, 
+            output_ids=True, 
         )
         # log_print(self.state_name, f"[{highlight()}] max_token_len: {messages_token_len} / {max_new_tokens}")
 
@@ -219,7 +224,8 @@ class SingleStepPPOTrainer:
         output_response: bool = False, 
     ):
         messages_ids = self.policy.chat_template_tokenizer(
-            chat_dict=messages, 
+            messages=messages, 
+            training_prompt=True,
         )
 
         policy_response, policy_response_ids, max_new_tokens = self.get_response(
