@@ -303,6 +303,7 @@ class PrefixTuningPolicyModel(nn.Module):
         ckpt_path: str = None, 
     ):
         if ckpt_path is None or not os.path.isfile(ckpt_path):
+            print('downloading from huggingface...')
             from huggingface_hub import hf_hub_download
             ckpt_path = hf_hub_download(
                 repo_id   = 'yasaisen/hardPrompt2softPrompt',
@@ -311,6 +312,8 @@ class PrefixTuningPolicyModel(nn.Module):
                 # cache_dir = cache_dir, 
                 # resume_download = True, 
             )
+        else:
+            print('loading from local...')
 
         model = cls(
             model_name=model_name,
