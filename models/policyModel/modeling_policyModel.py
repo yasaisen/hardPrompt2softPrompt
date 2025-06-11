@@ -73,14 +73,11 @@ class PrefixTuningPolicyModel(nn.Module):
             self.prefix_length = int(self.prefix_ids.shape[1])
             if self.model_name == 'google/gemma-3-1b-it':
                 self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
-                self.hidden_size = self.base_model.config.hidden_size
-                # word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
 
             elif self.model_name == 'google/gemma-3-4b-it':
                 self.max_length = self.tokenizer.model_max_length - self.prefix_length
-                self.hidden_size = self.base_model.config.text_config.hidden_size
-                # word_embeds = self.base_model.language_model.model.embed_tokens(self.prefix_ids)
-
+                
+            self.hidden_size = self.base_model.config.hidden_size
             word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
 
             self.prefix_embeddings = nn.Parameter(word_embeds.detach().clone().squeeze(), requires_grad=True)
