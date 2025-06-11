@@ -123,6 +123,8 @@ class PrefixTuningPolicyModel(nn.Module):
                 
         response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         generated_ids = torch.tensor(generated_ids, dtype=torch.long, device=self.device).unsqueeze(0)
+
+        response = response.split('/n')[0]
         
         if output_ids:
             return response, generated_ids

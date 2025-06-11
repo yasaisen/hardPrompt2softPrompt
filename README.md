@@ -5,6 +5,8 @@ do PPO on gemma-it based lm with prefix tuning
 ```bash
 conda create --name hard2softPPO python=3.10
 conda activate hard2softPPO
+
+git clone https://github.com/yasaisen/hardPrompt2softPrompt.git
 pip install torch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 --index-url https://download.pytorch.org/whl/cu121
 pip install transformers==4.51.3
 ```
