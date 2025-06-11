@@ -40,13 +40,23 @@ class PrefixTuningPolicyModel(nn.Module):
         log_print(self.state_name, f"Building...", silent)
 
         self.torch_dtype = torch_dtype
+        self.model_name = model_name
 
-        self.base_model = AutoModelForCausalLM.from_pretrained(
-            model_name, 
-            # attn_implementation="flash_attention_2", 
-            torch_dtype=self.torch_dtype
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if self.model_name == 'google/gemma-3-1b-it':
+            self.base_model = AutoModelForCausalLM.from_pretrained(
+                self.model_name, 
+                # attn_implementation="flash_attention_2", 
+                torch_dtype=self.torch_dtype
+            )
+
+        elif self.model_name == 'google/gemma-3-4b-it':
+            self.base_model = AutoModelForCausalLM.from_pretrained(
+                self.model_name, 
+                # attn_implementation="flash_attention_2", 
+                torch_dtype=self.torch_dtype
+            ).language_model
+
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         if self.tokenizer.pad_token is None:
             log_print(self.state_name, f"pad_token=None", silent)
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -61,15 +71,17 @@ class PrefixTuningPolicyModel(nn.Module):
             self.prefix_prompt = prefix_prompt
             self.prefix_ids = self.tokenizer.encode(self.prefix_prompt, add_special_tokens=False, return_tensors="pt").to(torch.long)
             self.prefix_length = int(self.prefix_ids.shape[1])
-            if model_name == 'google/gemma-3-1b-it':
+            if self.model_name == 'google/gemma-3-1b-it':
                 self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
                 self.hidden_size = self.base_model.config.hidden_size
-                word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
+                # word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
 
-            elif model_name == 'google/gemma-3-4b-it':
+            elif self.model_name == 'google/gemma-3-4b-it':
                 self.max_length = self.tokenizer.model_max_length - self.prefix_length
                 self.hidden_size = self.base_model.config.text_config.hidden_size
-                word_embeds = self.base_model.language_model.model.embed_tokens(self.prefix_ids)
+                # word_embeds = self.base_model.language_model.model.embed_tokens(self.prefix_ids)
+
+            word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
 
             self.prefix_embeddings = nn.Parameter(word_embeds.detach().clone().squeeze(), requires_grad=True)
             log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}", silent)
