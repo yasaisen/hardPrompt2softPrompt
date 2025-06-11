@@ -82,7 +82,7 @@ class SingleStepPPOTrainer:
             anneal_strategy=self.anneal_strategy
         )
 
-        hidden_size = self.policy.base_model.config.hidden_size
+        hidden_size = self.policy.hidden_size
         self.value_head = ValueHead(hidden_size).to(self.device)
 
         self.optimizer_value = optim.AdamW(
