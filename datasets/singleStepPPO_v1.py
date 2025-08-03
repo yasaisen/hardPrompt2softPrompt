@@ -59,6 +59,9 @@ class singleStepPPO_v1_Dataset(Dataset):
         )
         train_size = int(split_ratio * len(train_dataset))
         val_size = len(train_dataset) - train_size
+        if val_size % 2 == 1:
+            train_size = train_size + 1
+            val_size = val_size - 1
         train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size])
 
         return train_dataset, val_dataset
@@ -68,7 +71,10 @@ def get_loader(
     bsz: int,
 ) -> List:
     loader = []
-    for idx in range(int(len(dataset) / bsz) + 1):
+    it_size = int(len(dataset) // bsz)
+    if len(dataset) % bsz != 0:
+        it_size = it_size + 1
+    for idx in range(it_size):
         if (idx + 1) * bsz <= len(dataset):
             loader += [[dataset[i] for i in range(idx * bsz, (idx + 1) * bsz)]]
         else:

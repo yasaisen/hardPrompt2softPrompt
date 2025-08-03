@@ -19,6 +19,8 @@ import yaml
 from pprint import pprint
 import matplotlib.pyplot as plt
 import os
+import unicodedata
+import string
 
 
 def log_print(state_name, text, silent=False):
@@ -262,7 +264,39 @@ def plot_data_list(
         plt.savefig(os.path.join(os.getcwd(), save + '.png'))
     plt.show()
 
+def is_chinese_char(c):
+    code_point = ord(c)
+    return (
+        0x4E00 <= code_point <= 0x9FFF or 
+        0x3400 <= code_point <= 0x4DBF or 
+        0x20000 <= code_point <= 0x2A6DF or 
+        0x2A700 <= code_point <= 0x2B73F or 
+        0x2B740 <= code_point <= 0x2B81F or 
+        0x2B820 <= code_point <= 0x2CEAF or 
+        0xF900 <= code_point <= 0xFAFF
+    )
 
+def is_english_char(c):
+    return c.isascii() and c.isalpha()
+
+def is_digit_char(c):
+    return c.isdigit() or ('０' <= c <= '９')
+
+def is_symbol_char(c):
+    cat = unicodedata.category(c)
+    return cat.startswith('P') or cat.startswith('S')
+
+def detect_string_type(s):
+    has_chinese = any(is_chinese_char(c) for c in s)
+    has_english = any(is_english_char(c) for c in s)
+    has_digit   = any(is_digit_char(c) for c in s)
+    has_symbol  = any(is_symbol_char(c) for c in s)
+
+    not_keep_gen = True
+    if has_chinese or has_english or has_digit or has_symbol:
+        not_keep_gen = False
+
+    return not_keep_gen
 
 
 
