@@ -5,7 +5,7 @@
 
 model:
   reward_model:
-    reward_model_path: "weights/2505142311_best_model.pth"
+    reward_model_path: "../weights/2505142311_best_model.pth"
     bert_name: "bert-base-chinese"
     prefix_length: 20
     PPO_mode: True
@@ -17,7 +17,7 @@ model:
     torch_dtype: "float32"
 
 dataset:
-  data_path: "dataset/2501220014_paired_data_list.json"
+  data_path: "../dataset/2501220014_paired_data_list.json"
   split_ratio: 0.98
 
 task:

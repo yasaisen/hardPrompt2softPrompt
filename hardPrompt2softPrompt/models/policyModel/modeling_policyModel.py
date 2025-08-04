@@ -5,7 +5,7 @@
  This file is part of a project licensed under the MIT License.
  See the LICENSE file in the project root for more information.
  
- last modified in 2506111354
+ last modified in 2508031527
 """
 
 import torch
@@ -109,113 +109,92 @@ class PrefixTuningPolicyModel(nn.Module):
         self.to(self.device)
         log_print(self.state_name, f"...Done\n", silent)
 
-    # def generate_response(self, 
-    #     messages_ids: torch.Tensor, 
-    #     max_new_tokens: int = 100, 
-    #     use_prefix: bool = True,
-    #     temperature: float = 1.0,
-    #     prefix_checker: bool = False, 
-    #     output_ids: bool = False, 
-    # ):
-    #     self.eval()
-    #     generated_ids = []
-        
-    #     for _ in range(max_new_tokens):
-    #         input_ids = torch.cat([messages_ids, torch.tensor([generated_ids], dtype=torch.long, device=self.device)], dim=1)
-    #         with torch.no_grad():
-    #             logits = self(
-    #                 input_ids=input_ids, 
-    #                 use_prefix=use_prefix,
-    #                 output_hidden_states=False,
-    #                 prefix_checker=prefix_checker,
-    #                 stage='decode',
-    #             )
-    #         next_token_logits = logits[0, -1, :]
-    #         log_probs = F.log_softmax(next_token_logits / temperature, dim=-1)
-            
-    #         # greedy search
-    #         next_token_id = torch.argmax(log_probs, dim=-1).item()
-    #         generated_ids.append(next_token_id)
-            
-    #         if next_token_id == self.tokenizer.eos_token_id:
-    #             break
-                
-    #     response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
-    #     generated_ids = torch.tensor(generated_ids, dtype=torch.long, device=self.device).unsqueeze(0)
-
-    #     response = response.split('/n')[0]
-        
-    #     if output_ids:
-    #         return response, generated_ids
-    #     else:
-    #         return response
-
-    def generate_response_with_batch(self, 
+    def generate_response_with_batch(self,
         input_ids: torch.Tensor,  # [bsz, seq_len]
         attention_mask: torch.Tensor = None,  # [bsz, seq_len]
-        max_new_tokens: int = 50, 
+        max_new_tokens: int = 50,
         use_prefix: bool = True,
         temperature: float = 1.0
     ):
-        batch_size = input_ids.shape[0] # [batch_size, seq_len_padded]
-        
+        batch_size, orig_len = input_ids.shape  # [batch_size, seq_len_padded]
+
+        pad_token_id = self.tokenizer.pad_token_id
+
         if attention_mask is None:
-            attention_mask = (input_ids != pad_token_id).long()  # 1=token，0=padding
-        
-        seq_lengths = attention_mask.sum(dim=1)  # [batch_size]
-        
-        all_generated = input_ids.clone()
-        
+            attention_mask = (input_ids != pad_token_id).long()
+
+        # Preallocate tensors to avoid dynamic resizing which previously
+        # caused index errors when the generated sequence length reached the
+        # current tensor capacity.
+        max_length = orig_len + max_new_tokens
+
+        if attention_mask.shape[1] < max_length:
+            pad_mask = torch.zeros((batch_size, max_length - attention_mask.shape[1]),
+                                   device=attention_mask.device,
+                                   dtype=attention_mask.dtype)
+            attention_mask = torch.cat([attention_mask, pad_mask], dim=1)
+
+        all_generated = torch.full((batch_size, max_length), pad_token_id,
+                                   dtype=input_ids.dtype, device=input_ids.device)
+        all_generated[:, :orig_len] = input_ids
+
+        seq_lengths = attention_mask.sum(dim=1)
+
         unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=input_ids.device)
-        
+
         for step in range(max_new_tokens):
+            current_max_len = int(seq_lengths.max().item())
+
             with torch.no_grad():
                 logits = self(
-                    input_ids=all_generated, 
-                    attention_mask=attention_mask,
+                    input_ids=all_generated[:, :current_max_len],
+                    attention_mask=attention_mask[:, :current_max_len],
                     use_prefix=use_prefix,
                     output_hidden_states=False,
                     stage='decode',
                 )
                 logits = logits[:, (self.prefix_length - 1):, :]
-            
+
             next_token_logits = []
             for i in range(batch_size):
                 curr_length = int(seq_lengths[i].item())
-                next_token_logits.append(logits[i, curr_length-1:curr_length])
-            
+                next_token_logits.append(logits[i, curr_length - 1:curr_length])
+
             next_token_logits = torch.cat(next_token_logits, dim=0)
-            
+
             next_tokens = next_token_logits.argmax(dim=-1)  # [batch_size]
-            
+
             for i in range(batch_size):
                 if unfinished_sequences[i] == 1:
                     curr_length = int(seq_lengths[i].item())
 
-                    if curr_length >= all_generated.shape[1]:
-                        new_pad = torch.zeros((all_generated.size(0), 1), device=all_generated.device, dtype=all_generated.dtype)
-                        all_generated = torch.cat([all_generated, new_pad], dim=1)
-                        attention_mask = torch.cat([attention_mask, new_pad], dim=1)
+                    # Ensure we do not write beyond the preallocated buffer
+                    if curr_length >= max_length:
+                        continue
+
                     all_generated[i, curr_length] = next_tokens[i]
-                    
+
                     seq_lengths[i] += 1
                     attention_mask[i, curr_length] = 1
-                    
+
                     if next_tokens[i] == self.tokenizer.eos_token_id:
                         unfinished_sequences[i] = 0
 
                     now_str = self.tokenizer.decode(next_tokens[i], skip_special_tokens=True)
                     if detect_string_type(now_str):
-                        
+
                         # log_print('check', f"[{highlight()}] [{next_tokens[i]}] [{now_str}]")
                         unfinished_sequences[i] = 0
 
             if unfinished_sequences.sum() == 0:
                 break
 
-        batch_outputs = self.tokenizer.batch_decode(all_generated, skip_special_tokens=True)
-        
-        return batch_outputs, all_generated
+        final_max_len = int(seq_lengths.max().item())
+        batch_outputs = self.tokenizer.batch_decode(
+            all_generated[:, :final_max_len], skip_special_tokens=True
+        )
+
+        return batch_outputs, all_generated[:, :final_max_len]
 
     def full_forward(self, 
         messages_ids: torch.Tensor,

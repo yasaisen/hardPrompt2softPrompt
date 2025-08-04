@@ -79,6 +79,8 @@ def get_loader(
             loader += [[dataset[i] for i in range(idx * bsz, (idx + 1) * bsz)]]
         else:
             loader += [[dataset[i] for i in range(idx * bsz, len(dataset))]]
+    if len(loader[-1]) < 2:
+        del loader[-1]
     return loader
 
 def get_loader_forTest(

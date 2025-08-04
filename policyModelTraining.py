@@ -1,8 +1,11 @@
 """
- Copyright (c) 2025, yasaisen(clover).
- All rights reserved.
-
- last modified in 2505061628
+ SPDX-License-Identifier: MIT
+ Copyright (c) 2025, yasaisen (clover)
+ 
+ This file is part of a project licensed under the MIT License.
+ See the LICENSE file in the project root for more information.
+ 
+ last modified in 2508031527
 """
 
 import torch
@@ -25,7 +28,8 @@ def batch_step(
     ppo_trainer: SingleStepPPOTrainer,
     train_batch_samples: List[Dict[str, str]],
     valid_loader: List[Dict[str, str]],
-    epoch_idx: int,
+    epoch_idx: int, 
+    batch_idx:int, 
     cfg_handler: ConfigHandler,
     ppo_Kepochs: int = 8,
 ) -> List[Dict[str, float]]:
@@ -124,7 +128,8 @@ def main():
                 valid_loader=valid_loader,
                 ppo_Kepochs=sample_loop,
                 cfg_handler=cfg_handler,
-                epoch_idx=epoch_idx,
+                epoch_idx=epoch_idx, 
+                batch_idx=batch_idx, 
             )
 
             # train_metrics_avg = calu_dict_avg(

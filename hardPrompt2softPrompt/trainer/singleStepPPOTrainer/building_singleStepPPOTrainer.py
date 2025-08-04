@@ -5,7 +5,7 @@
  This file is part of a project licensed under the MIT License.
  See the LICENSE file in the project root for more information.
  
- last modified in 2506111202
+ last modified in 2508031527
 """
 
 import torch
@@ -221,11 +221,12 @@ class SingleStepPPOTrainer:
         
         reward_list = []
         for context, response in zip(batch_context, batch_response):
-            reward_list += [self.compute_reward(
-                context=str(context), 
-                response=response
-            )]
-
+            reward_list += [
+                self.compute_reward(
+                    context=str(context), 
+                    response=response
+                )
+            ]
         return torch.tensor(reward_list).to(self.device)
 
     def sample_init(self,
@@ -247,7 +248,7 @@ class SingleStepPPOTrainer:
             use_prefix=True, 
             print_response=False, 
         )
-        # log_print('sample_init', f"[{highlight('policy_response')}] {len(policy_response)}")
+        # log_print('sample_init', f"[{highlight('policy_response')}] {policy_response}")
         # log_print('sample_init', f"[{highlight('policy_response_ids')}] {policy_response_ids.shape}")
         # print()
         policy_response_logits, policy_hidden_states, policy_seq_old_logp, entropy = self.get_full_forward(
@@ -298,11 +299,17 @@ class SingleStepPPOTrainer:
             batch_response=reference_response
         )
         reference_rewards = (reference_rewards - reference_rewards.mean()) / (reference_rewards.std()+1e-8)      # [B]
-        # log_print('sample_init', f"[{highlight('reference_response')}] {len(reference_response)}")
+        # log_print('sample_init', f"[{highlight('reference_response')}] {reference_response}")
         # log_print('sample_init', f"[{highlight('reference_rewards')}] {reference_rewards}")
         # print()
-        diff_reward = (policy_rewards - reference_rewards).mean()
-        
+        print()
+        log_print('sample_init', f"[{highlight('policy_rewards')}] {policy_rewards}")
+        log_print('sample_init', f"[{highlight('reference_rewards')}] {reference_rewards}")
+        diff_reward = policy_rewards - reference_rewards
+        diff_reward = diff_reward.mean()
+        log_print('sample_init', f"[{highlight('diff_reward')}] {diff_reward}")
+        print()
+
         # raise 'meow'
         if not valid:
             sample_results = {
