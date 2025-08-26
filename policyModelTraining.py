@@ -126,14 +126,17 @@ def valid_batch_step(
     #     bsz=bsz, 
     # )
 
+    reward_diff = sum(s['reward_diff'] for s in valid_rollout_list) / len(valid_rollout_list)
+
     metrics = {
         'epoch_idx': epoch_idx, 
         'state': 'valid', 
+        'diff_reward': reward_diff, 
         'valid_rollout_list': valid_rollout_list, 
     }
     cfg_handler.save_result(result=metrics)
     valid_metrics_list += [metrics]
-    
+
     torch.cuda.empty_cache()
     return valid_metrics_list, valid_global_step
 
@@ -200,12 +203,12 @@ def main():
         #     avoid_key_list=avoid_key_list,
         #     show=True,
         # )
-        # log_print(f'{highlight()}', valid_metrics_avg['diff_reward'])
-        # if valid_metrics_avg['diff_reward'] > best_reward:
-        #     best_reward = valid_metrics_avg['diff_reward']
+        # log_print(f'{highlight()}', valid_metrics_list[0]['diff_reward'])
+        # if valid_metrics_list[0]['diff_reward'] > best_reward:
+        #     best_reward = valid_metrics_list[0]['diff_reward']
         #     cfg_handler.save_weight({
         #         'epoch_idx': epoch_idx, 
-        #         'diff_reward': valid_metrics_avg['diff_reward'], 
+        #         'diff_reward': valid_metrics_list[0]['diff_reward'], 
         #         'prefix_embeddings_state_dict': ppo_trainer.policy.prefix_embeddings.detach(),
         #         'prefix_ids': ppo_trainer.policy.prefix_ids,
         #         'value_head_state_dict': ppo_trainer.value_head.parameters()

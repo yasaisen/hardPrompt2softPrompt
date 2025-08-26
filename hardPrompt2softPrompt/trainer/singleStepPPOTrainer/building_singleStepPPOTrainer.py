@@ -240,8 +240,6 @@ class SingleStepPPOTrainer:
         valid: bool = False, 
     ) -> List[Dict]:
         log_print('collect_rollouts', f"Processing {len(b_dataset)} batches...")
-
-        # TODO check += dtype to agg
         
         rollout_list = []
         valid_rollout_list = []
@@ -288,14 +286,14 @@ class SingleStepPPOTrainer:
                 b_messages=b_contexts, # [bsz, str(chat_format)]
                 b_response_text=b_response_text, # [bsz, (response_text)]
             )
-            b_rewards = (b_rewards - b_rewards.mean()) / b_rewards.std().clamp_min(1e-8)
+            b_rewards_n = (b_rewards - b_rewards.mean()) / b_rewards.std().clamp_min(1e-8)
             # b_rewards: [bsz]
-            rollout['rewards'] = b_rewards.detach()
+            rollout['rewards'] = b_rewards_n.detach()
 
             b_advantages = b_rewards - b_seq_values # [bsz]
-            b_advantages = (b_advantages - b_advantages.mean()) / b_advantages.std().clamp_min(1e-8)
+            b_advantages_n = (b_advantages - b_advantages.mean()) / b_advantages.std().clamp_min(1e-8)
             # b_advantages: [bsz]
-            rollout['advantages'] = b_advantages.detach()
+            rollout['advantages'] = b_advantages_n.detach()
 
             ###############################################
 
@@ -314,7 +312,7 @@ class SingleStepPPOTrainer:
                 valid_rollout = {}
                 valid_rollout['messages_text'] = rollout['messages_text']
                 valid_rollout['pol_response_text'] = rollout['response_text']
-                valid_rollout['pol_rewards'] = rollout['rewards']
+                valid_rollout['pol_rewards'] = b_rewards.detach()
 
                 _, b_response_text_ref, _ = self.get_response(
                     b_messages=b_messages, # [bsz, (chat_format)]
@@ -356,18 +354,6 @@ class SingleStepPPOTrainer:
     def ppo_loss(self, 
         rollout_list: List[Dict], 
     ) -> Tuple[Dict[str, torch.Tensor], List[Dict[str, torch.Tensor]]]:
-        
-        # TODO check all list in dict have same len
-        iter_len = len(rollout_list)
-        # TODO if there is splited the bsz first
-
-        
-        # for sample in rollout_list:
-        #     print("="*30)
-        #     for key in list(sample.keys()):
-        #         log_print("checking", f"{highlight(key)} {sample[key]}")
-        #     print("="*30, '\n')
-        
 
         metric_list = []
         for sample in rollout_list:
