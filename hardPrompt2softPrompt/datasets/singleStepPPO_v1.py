@@ -42,9 +42,11 @@ class singleStepPPO_v1_Dataset(Dataset):
         for single_sample in messages:
             single_sample['content'] = [{"type": "text", "text": single_sample['content']},]
 
-        samples = {}
-        samples["messages"] = messages
-        samples["context"] = context
+        samples = {
+            # 'sample_idx': idx, 
+            'messages': messages, 
+            'context': context, 
+        }
 
         return samples
         

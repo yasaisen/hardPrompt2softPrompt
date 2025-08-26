@@ -67,6 +67,13 @@ class ConfigHandler:
         result: Dict,
         print_log: bool = False,
     ):
+        for key in list(result.keys()):
+            if isinstance(result[key], torch.Tensor):
+                if result[key].ndim == 0:
+                    result[key] = result[key].item()
+                else:
+                    result[key] = result[key].tolist()
+
         with open(self.log_save_path, "a") as f:
             f.write(f"{result}\n")
 
@@ -146,7 +153,8 @@ def calu_dict_avg(
         
     for single_dict in local_metrics_list:
         for key in local_metrics:
-            local_metrics[key] += single_dict[key]
+            if not isinstance(single_dict[key], list):
+                local_metrics[key] += single_dict[key]
 
     if show:
         print('\n', f'[{state}_{str(epoch_idx)}_Results]', '=' * 43)

@@ -5,13 +5,14 @@
  This file is part of a project licensed under the MIT License.
  See the LICENSE file in the project root for more information.
  
- last modified in 2508031527
+ last modified in 2508251733
 """
 
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from typing import List, Tuple, Dict
+from tqdm import tqdm
 
 from ...common.utils import log_print, highlight_show, highlight
 from ...models.rewardModel.modeling_rewardModel import ComparativeRewardModel
@@ -19,165 +20,189 @@ from ...models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 from ...models.valueHead.modeling_valueHead import ValueHead
 
 
+from dataclasses import dataclass
+
+@dataclass
+class optConfig:
+    learning_rate: float
+    weight_decay: float
+    max_lr: float
+    num_epoch: int
+    steps_per_epoch: int
+    pct_start: float
+    anneal_strategy: str
+    
+    def get_optimizer_scheduler(self, 
+        params, 
+    ):
+        optimizer = optim.AdamW(
+            params,
+            lr=self.learning_rate,
+            weight_decay=self.weight_decay
+        )
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            optimizer,
+            max_lr=self.max_lr,
+            epochs=self.num_epoch,
+            steps_per_epoch=self.steps_per_epoch,
+            pct_start=self.pct_start,
+            anneal_strategy=self.anneal_strategy
+        )
+        return optimizer, scheduler
+
 class SingleStepPPOTrainer:
     def __init__(self,
         policy_model: PrefixTuningPolicyModel,
         reward_model: ComparativeRewardModel,
+        value_head: ValueHead, 
+        policy_opt_config: optConfig, 
+        value_opt_config: optConfig, 
         device: str = "cuda",
-        clip_epsilon: float = 0.2,
-        entropy_coef: float = 0.01,
-        kl_coef: float = 0.1, 
-        max_kl: float = 0.2, 
-        value_clip = 0.2,
-        vf_coef = 0.3,
-        max_grad_norm: float = 1.0,
-        max_token_len: int = 50,
+        
         temperature: float = 1.0,
-        learning_rate: float = 1e-5,
-        weight_decay: float = 1e-4, 
-        max_lr: float = 1e-3, 
-        num_epoch: int = 30, 
-        steps_per_epoch: int = 30, 
-        pct_start: float = 0.2, 
-        anneal_strategy: str = 'cos', 
+        use_kl: bool = False, 
+        clip_epsilon: float = 0.2, 
+        max_kl: float = 0.2, 
+        valueL_coef: float = 0.3, 
+        klL_coef: float = 0.1, 
+        entropyL_coef: float = 0.01, 
+        max_grad_norm: float = 1.0, 
     ):
         self.state_name = 'SingleStepPPOTrainer'
         self.device = device
         print()
         log_print(self.state_name, f"Building...")
 
-        self.policy = policy_model.to(self.device)
-        self.reward_model = reward_model.to(self.device)
-
+        self.temperature = temperature
+        self.use_kl = use_kl
         self.clip_epsilon = clip_epsilon
-        self.entropy_coef = entropy_coef
-        self.kl_coef = kl_coef
         self.max_kl = max_kl
-        self.value_clip = value_clip
-        self.vf_coef = vf_coef
+        self.valueL_coef = valueL_coef
+        self.klL_coef = klL_coef
+        self.entropyL_coef = entropyL_coef
 
         self.max_grad_norm = max_grad_norm
-        self.max_token_len = max_token_len
-        self.temperature = temperature
 
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.max_lr = max_lr
-        self.num_epoch = num_epoch
-        self.steps_per_epoch = steps_per_epoch
-        self.pct_start = pct_start
-        self.anneal_strategy = anneal_strategy
-        
-        self.optimizer_policy = optim.AdamW(
-            [self.policy.prefix_embeddings],
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay
-        )
-        self.scheduler_policy = optim.lr_scheduler.OneCycleLR(
-            self.optimizer_policy,
-            max_lr=self.max_lr,
-            epochs=self.num_epoch,
-            steps_per_epoch=self.steps_per_epoch,
-            pct_start=self.pct_start,
-            anneal_strategy=self.anneal_strategy
-        )
+        self.policy = policy_model.to(self.device)
+        self.reward_model = reward_model.to(self.device)
+        self.value_head = value_head.to(self.device)
 
-        hidden_size = self.policy.hidden_size
-        self.value_head = ValueHead(hidden_size).to(self.device)
-
-        self.optimizer_value = optim.AdamW(
-            self.value_head.parameters(),
-            lr=self.learning_rate,
-            weight_decay=self.weight_decay
+        self.optimizer_policy, self.scheduler_policy = policy_opt_config.get_optimizer_scheduler(
+            params=[self.policy.prefix_embeddings]
         )
-        self.scheduler_value = optim.lr_scheduler.OneCycleLR(
-            self.optimizer_value,
-            max_lr=self.max_lr,
-            epochs=self.num_epoch,
-            steps_per_epoch=self.steps_per_epoch,
-            pct_start=self.pct_start,
-            anneal_strategy=self.anneal_strategy
+        self.optimizer_value, self.scheduler_value = value_opt_config.get_optimizer_scheduler(
+            params=self.value_head.parameters()
         )
-
-        self.training_stats = {
-            'steps': 0,
-            'total_policy_reward': 0,
-            'total_reference_reward': 0,
-            'total_step_kl': 0,
-            'avg_policy_reward': 0,
-            'avg_reference_reward': 0,
-            'avg_step_kl': 0
-        }
         log_print(self.state_name, f"...Done\n")
 
-    def get_response(self,
-        messages_ids: torch.Tensor, 
-        attention_mask: torch.Tensor, 
-        use_prefix: bool,
-        print_response: bool = False,
+    def batch_processor(self,
+        b_samples # [bsz, {'messages': (chat_format), 'context': str}]
     ):
-        if print_response:
-            highlight_show('got_context', self.policy.tokenizer.decode(messages_ids[:, self.policy.prefix_check_tensor_len:].tolist()[0], skip_special_tokens=False))
+        b_messages = []
+        b_contexts = []
+        for sample in b_samples:
+            b_messages += [sample['messages']]
+            b_contexts += [sample['context']]
 
-        policy_response, policy_generated_ids = self.policy.generate_response_with_batch(
-            input_ids=messages_ids,
-            attention_mask=attention_mask,
-            use_prefix=use_prefix,
-            temperature=self.temperature
+        return b_messages, b_contexts
+
+    @torch.no_grad()
+    def get_response(self,
+        b_messages: List[List[Dict]], # [bsz, (chat_format)]
+        use_prefix: bool, 
+        temperature: float, 
+    ):
+        b_messages_ids, b_message_attnmask = self.policy.chat_template_tokenizer(
+            b_messages=b_messages, # [bsz, (chat_format)]
         )
-        # log_print(self.state_name, f"[{highlight()}] max_token_len: {messages_token_len} / {max_new_tokens}")
-
-        if print_response:
-            highlight_show('policy_response', policy_response)
-
-        return policy_response, policy_generated_ids
+        b_response_text, b_response_ids = self.policy.generate_response_with_batch(
+            input_ids=b_messages_ids, # [bsz, max_token_len]
+            attention_mask=b_message_attnmask, # [bsz, max_token_len]
+            use_prefix=use_prefix,
+            temperature=temperature,
+        )
+        # b_messages_ids: [bsz, max_token_len]
+        # b_response_text: [bsz, (response_text)]
+        # b_response_ids: [bsz, max_new_tokens]
+        return b_messages_ids, b_response_text, b_response_ids
     
     def get_full_forward(self,
-        messages_ids: torch.Tensor, 
-        response_ids: torch.Tensor, 
-        use_prefix: bool, 
-        valid: bool, 
+        b_messages_ids: torch.Tensor, # [bsz, max_token_len]
+        b_response_ids: torch.Tensor, # [bsz, max_new_tokens]
+        use_prefix: bool,
+        no_grad: bool, 
+        temperature: float, 
     ):
-        if not valid:
+        if (not no_grad) and use_prefix:
             self.policy.train()
-            response_logits, hidden_states, seq_old_logp, entropy = self.policy.full_forward(
-                messages_ids=messages_ids, 
-                response_ids=response_ids,
-                use_prefix=use_prefix,
-                temperature=self.temperature,
+            b_last_prompt_hidden_state, b_seq_logp, b_entropy, b_response_logits = self.policy.full_forward(
+                messages_ids=b_messages_ids, # [bsz, max_token_len]
+                response_ids=b_response_ids, # [bsz, max_new_tokens]
+                use_prefix=True,
+                temperature=temperature,
             )
         else:
             self.policy.eval()
             with torch.no_grad():
-                response_logits, hidden_states, seq_old_logp, entropy = self.policy.full_forward(
-                    messages_ids=messages_ids, 
-                    response_ids=response_ids,
+                b_last_prompt_hidden_state, b_seq_logp, b_entropy, b_response_logits = self.policy.full_forward(
+                    messages_ids=b_messages_ids, # [bsz, max_token_len]
+                    response_ids=b_response_ids, # [bsz, max_new_tokens]
                     use_prefix=use_prefix,
-                    temperature=self.temperature,
+                    temperature=temperature,
                 )
-
-        return response_logits, hidden_states, seq_old_logp, entropy
+                b_seq_logp = b_seq_logp.detach()
+                b_entropy = b_entropy.detach()
+        # b_last_prompt_hidden_state: [bsz, hidden_size]
+        # b_seq_logp: [bsz]
+        # b_entropy: [bsz]
+        # b_response_logits: [bsz, max_new_tokens, vocab_size]
+        return b_last_prompt_hidden_state.detach(), b_seq_logp, b_entropy, b_response_logits
         
     def get_seq_values(self,
-        hidden_states: torch.Tensor, 
-        valid: bool, 
+        b_last_prompt_hidden_state: torch.Tensor, # [bsz, hidden_size]
+        no_grad: bool, 
     ):
-        hidden_for_value = hidden_states.detach()
-        if not valid:
+        if not no_grad:
             self.value_head.train()
-            policy_values  = self.value_head(hidden_for_value)
-            seq_old_values = policy_values[:, -1]  # [B]
+            seq_values  = self.value_head(b_last_prompt_hidden_state.detach())
         else:
             self.value_head.eval()
             with torch.no_grad():
-                policy_values  = self.value_head(hidden_for_value)
-                seq_old_values = policy_values[:, -1].detach()  # [B]
+                seq_values  = self.value_head(b_last_prompt_hidden_state.detach()).detach()
+        # seq_values: [bsz]
+        return seq_values
 
-        return seq_old_values
+    @torch.no_grad()
+    def compute_batch_reward(self, 
+        b_messages: List[str], # [bsz, (chat_format)]
+        b_response_text: List[str], # [bsz, (response_text)]
+    ) -> List[float]:
+        
+        reward_list = []
+        for context, response in zip(b_messages, b_response_text):
+            context_ids = self.reward_model.truncate_from_beginning(str(context))
+            response_ids = self.reward_model.truncate_from_beginning(response)
+
+            context_mask = torch.ones_like(context_ids)
+            response_mask = torch.ones_like(response_ids)
+
+            self.reward_model.eval()
+            with torch.no_grad():
+                reward = self.reward_model.get_reward(
+                    context_ids,
+                    context_mask,
+                    response_ids,
+                    response_mask
+                ).detach()
+            reward_list += [reward]
+        
+        rewards = torch.tensor(reward_list).to(self.device)
+        # rewards: [bsz]
+        return rewards
 
     def compute_stepwise_kl(self, 
         policy_logits: torch.Tensor, 
-        reference_logits: torch.Tensor
+        reference_logits: torch.Tensor, 
     ) -> torch.Tensor:
         policy_logits = policy_logits.to(torch.float32)
         reference_logits = reference_logits.to(torch.float32)
@@ -193,252 +218,255 @@ class SingleStepPPOTrainer:
         kl_divergence = kl_divergence.sum(dim=-1)
         return kl_divergence
 
-    def compute_reward(self, 
-        context: str, 
-        response: str
-    ) -> float:
-        context_ids = self.reward_model.truncate_from_beginning(context)
-        response_ids = self.reward_model.truncate_from_beginning(response)
-
-        context_mask = torch.ones_like(context_ids)
-        response_mask = torch.ones_like(response_ids)
-
-        self.reward_model.eval()
-        with torch.no_grad():
-            reward = self.reward_model.get_reward(
-                context_ids,
-                context_mask,
-                response_ids,
-                response_mask
-            )
-        # return reward.item()
-        return reward.detach()
-
-    def compute_batch_reward(self, 
-        batch_context, 
-        batch_response, 
-    ) -> List[float]:
-        
-        reward_list = []
-        for context, response in zip(batch_context, batch_response):
-            reward_list += [
-                self.compute_reward(
-                    context=str(context), 
-                    response=response
-                )
-            ]
-        return torch.tensor(reward_list).to(self.device)
-
-    def sample_init(self,
-        context: str,
-        messages: List[Dict[str, str]], 
-        valid: bool = False, 
-        output_response: bool = False, 
+    def compute_seq_avg_kl(self, 
+        policy_logits: torch.Tensor, 
+        reference_logits: torch.Tensor, 
     ):
-        batched_messages_ids, batched_messages_attnmask = self.policy.chat_template_tokenizer(
-            chat_dicts=messages, 
-            max_length=self.max_token_len,
-        )
-        policy_response, policy_response_ids = self.get_response(
-            messages_ids=batched_messages_ids, 
-            attention_mask=batched_messages_attnmask,
-            use_prefix=True, 
-            print_response=False, 
-        )
-        policy_response_logits, policy_hidden_states, policy_seq_old_logp, entropy = self.get_full_forward(
-            messages_ids=batched_messages_ids, 
-            response_ids=policy_response_ids, 
-            use_prefix=True, 
-            valid=valid, 
-        )
-        reference_response_logits, _, reference_seq_new_logp, _ = self.get_full_forward(
-            messages_ids=batched_messages_ids, 
-            response_ids=policy_response_ids,
-            use_prefix=False,
-            valid=valid, 
-        )
-        policy_rewards = self.compute_batch_reward(
-            batch_context=context,
-            batch_response=policy_response,
-        )
-        policy_rewards = (policy_rewards - policy_rewards.mean()) / (policy_rewards.std()+1e-8)      # [B]
-
-        seq_old_values = self.get_seq_values(
-            hidden_states=policy_hidden_states,
-            valid=True
-        )
-
-        raw_advantages = policy_rewards - seq_old_values  # [B]
-        advantages = (raw_advantages - raw_advantages.mean()) / (raw_advantages.std() + 1e-8)
-        returns = raw_advantages + seq_old_values
-
-        reference_response, _ = self.get_response(
-            messages_ids=batched_messages_ids, 
-            attention_mask=batched_messages_attnmask, 
-            use_prefix=False, 
-            print_response=False, 
-        )
-        reference_rewards = self.compute_batch_reward(
-            batch_context=context, 
-            batch_response=reference_response
-        )
-        reference_rewards = (reference_rewards - reference_rewards.mean()) / (reference_rewards.std()+1e-8)      # [B]
-
-        print()
-        log_print('sample_init', f"[{highlight('policy_rewards')}] {policy_rewards}")
-        log_print('sample_init', f"[{highlight('reference_rewards')}] {reference_rewards}")
-        diff_reward = policy_rewards - reference_rewards
-        diff_reward = diff_reward.mean()
-        log_print('sample_init', f"[{highlight('diff_reward')}] {diff_reward}")
-        print()
-
-        # raise 'meow'
-        if not valid:
-            sample_results = {
-                'messages_ids': batched_messages_ids,
-                'policy_response_ids': policy_response_ids,
-
-                'policy_seq_old_logp': policy_seq_old_logp,
-                'reference_seq_new_logp': reference_seq_new_logp,
-                'reference_response_logits': reference_response_logits,
-                'advantages': advantages,
-                'returns': returns,
-                'seq_old_values': seq_old_values,
-                'policy_rewards': policy_rewards,
-                'reference_rewards': reference_rewards,
-            }
-        else:
-            sample_results = None       
-        metrics = {
-            'state': 'valid' if valid else 'warmUp',
-
-            'policy_seq_old_logp': policy_seq_old_logp, # .item(),
-            'reference_seq_new_logp': reference_seq_new_logp, # .item(),
-            'advantages': advantages, # .item(),
-            'returns': returns, # .item(),
-            'seq_old_values': seq_old_values, # .item(),
-            'policy_rewards': policy_rewards, # .item(),
-            'reference_rewards': reference_rewards, # .item(),
-            'diff_reward': diff_reward.item(), 
-
-            'context_messages': str(messages),
-            'policy_response': str(policy_response),
-            'reference_response': str(reference_response),
-        }
-
-        for key in metrics:
-            if key not in ['context_messages', 'policy_response', 'reference_response']:
-                log_print('sample_init', f"[{highlight(key)}] {metrics[key]}")
-                if isinstance(metrics[key], torch.Tensor):
-                    if torch.isnan(metrics[key]).any() or torch.isinf(metrics[key]).any():
-                        raise f"{key} / {metrics[key]}"
-        print()
-
-        return sample_results, metrics
-
-    def compute_policy_loss(self,
-        sample_results: Dict[str, torch.Tensor], 
-        valid: bool = False,
-        output_response: bool = False, 
-    ):
-
-        policy_response_logits, policy_hidden_states, policy_seq_new_logp, seq_entropy = self.get_full_forward(
-            messages_ids=sample_results['messages_ids'], 
-            response_ids=sample_results['policy_response_ids'], 
-            use_prefix=True, 
-            valid=valid, 
-        )
-
-        entropy_loss = - self.entropy_coef * seq_entropy
-
-
-        log_ratio = policy_seq_new_logp - sample_results['policy_seq_old_logp']
-        seq_ratio = torch.exp(log_ratio)  # [B]
-        approx_kl = ((seq_ratio - 1) - log_ratio).mean()
-        clip_frac = ((seq_ratio - 1.0).abs() > self.clip_epsilon).float().mean()
-
-        pg_surr1 = seq_ratio * sample_results['advantages']
-        pg_surr2 = torch.clamp(
-            seq_ratio,
-            1.0 - self.clip_epsilon,
-            1.0 + self.clip_epsilon
-        ) * sample_results['advantages']
-        pg_loss = -torch.min(pg_surr1, pg_surr2).mean()
-
-        # policy_hidden_states = policy_hidden_states[-1][:, -1]  # [B, D]
-        seq_new_values = self.get_seq_values(
-            hidden_states=policy_hidden_states, 
-            valid=valid
-        )
-
-        seq_values_clipped = sample_results['seq_old_values'] + torch.clamp(
-            seq_new_values - sample_results['seq_old_values'],
-            -self.value_clip,
-            self.value_clip
-        )
-        vf_surr1 = (seq_new_values - sample_results['returns']) ** 2
-        vf_surr2 = (seq_values_clipped - sample_results['returns']) ** 2
-        vf_loss = self.vf_coef * torch.max(vf_surr1, vf_surr2).mean()
-
-        seq_kl = policy_seq_new_logp - sample_results['reference_seq_new_logp']  # [B]
-        kl_loss = seq_kl.mean()
-        kl_loss = self.kl_coef * kl_loss
-
         total_kl = torch.tensor(0.0, device=self.device)
-        for step_idx in range(sample_results['policy_response_ids'].shape[1]):
+        new_token_len = int(policy_logits.shape[1])
+        for step_idx in range(new_token_len):
             step_kl = self.compute_stepwise_kl(
-                policy_logits=policy_response_logits[:, step_idx], 
-                reference_logits=sample_results['reference_response_logits'][:, step_idx],
+                policy_logits=policy_logits, 
+                reference_logits=reference_logits,
             )
             total_kl += step_kl.mean()
-        avg_kl = total_kl / int(sample_results['policy_response_ids'].shape[1])
-        kl_loss = self.kl_coef * torch.max(
-            avg_kl - self.max_kl, 
-            torch.tensor(0.0, device=self.device)
-        )
+        avg_kl = total_kl / new_token_len
 
-        total_loss = pg_loss + vf_loss + kl_loss + entropy_loss
+        return avg_kl
 
-        metrics = {
-            'state': 'valid' if valid else 'train',
+    @torch.no_grad()
+    def collect_rollouts(self, 
+        b_dataset: List[List[Dict[str, str]]],  # [num_batches, bsz, chat_format]
+        valid: bool = False, 
+    ) -> List[Dict]:
+        log_print('collect_rollouts', f"Processing {len(b_dataset)} batches...")
 
-            'policy_seq_old_logp': sample_results['policy_seq_old_logp'].tolist(),
-            'policy_seq_new_logp': policy_seq_new_logp.tolist(),
-            'seq_ratio': seq_ratio.tolist(),
-            'approx_kl': approx_kl.item(),
-            'clip_frac': clip_frac.item(),
-            'advantages': sample_results['advantages'].tolist(),
-            'returns': sample_results['returns'].tolist(),
-            'pg_surr1': pg_surr1.tolist(),
-            'pg_surr2': pg_surr2.tolist(),
-            'pg_loss': pg_loss.item(),
+        # TODO check += dtype to agg
+        
+        rollout_list = []
+        valid_rollout_list = []
+        for b_samples in tqdm(b_dataset):
+            rollout = {}
+            b_messages, b_contexts = self.batch_processor(
+                b_samples=b_samples
+            )
+            b_messages_ids, b_response_text, b_response_ids = self.get_response(
+                b_messages=b_messages, # [bsz, (chat_format)]
+                use_prefix=True, 
+                temperature=self.temperature, 
+            )
+            rollout['context_text'] = b_contexts # [bsz, str(chat_format)]
+            rollout['messages_ids'] = b_messages_ids # [bsz, max_token_len]
+            rollout['messages_text'] = b_messages # [bsz, (chat_format)]
+            rollout['response_ids'] = b_response_ids # [bsz, max_new_tokens]
+            rollout['response_text'] = b_response_text # [bsz, (response_text)]
 
-            'seq_old_values': sample_results['seq_old_values'].tolist(),
-            'seq_new_values': seq_new_values.tolist(),
-            'seq_values_clipped': seq_values_clipped.tolist(),
-            'policy_rewards': sample_results['policy_rewards'].tolist(),
-            'vf_surr1': vf_surr1.tolist(),
-            'vf_surr2': vf_surr2.tolist(),
-            'vf_loss': vf_loss.item(),
+            ###############################################
 
-            'kl_loss': kl_loss.item(),
-            'entropy': seq_entropy.item(),
-            'entropy_loss': entropy_loss.item(),
-            'total_loss': total_loss.item(),
+            b_last_prompt_hidden_state, b_seq_logp, _, _ = self.get_full_forward(
+                b_messages_ids=b_messages_ids, # [bsz, (chat_format)]
+                b_response_ids=b_response_ids, # [bsz, max_new_tokens]
+                use_prefix=True, 
+                no_grad=True, 
+                temperature=self.temperature, 
+            )
+            # b_seq_logp: [bsz]
+            rollout['seq_old_logp'] = b_seq_logp.detach()
+
+            ###############################################
+
+            b_seq_values = self.get_seq_values(
+                b_last_prompt_hidden_state=b_last_prompt_hidden_state, # [bsz, hidden_size]
+                no_grad=True, 
+            )
+            # b_seq_values: [bsz]
+            rollout['seq_old_values'] = b_seq_values
+
+            ###############################################
+
+            b_rewards = self.compute_batch_reward(
+                b_messages=b_contexts, # [bsz, str(chat_format)]
+                b_response_text=b_response_text, # [bsz, (response_text)]
+            )
+            b_rewards = (b_rewards - b_rewards.mean()) / b_rewards.std().clamp_min(1e-8)
+            # b_rewards: [bsz]
+            rollout['rewards'] = b_rewards.detach()
+
+            b_advantages = b_rewards - b_seq_values # [bsz]
+            b_advantages = (b_advantages - b_advantages.mean()) / b_advantages.std().clamp_min(1e-8)
+            # b_advantages: [bsz]
+            rollout['advantages'] = b_advantages.detach()
+
+            ###############################################
+
+            if self.use_kl:
+                _, _, _, b_ref_response_logits = self.get_full_forward(
+                    b_messages_ids=b_messages_ids, # [bsz, (chat_format)]
+                    b_response_ids=b_response_ids, # [bsz, max_new_tokens]
+                    use_prefix=False, 
+                    no_grad=True, 
+                    temperature=self.temperature, 
+                )
+                # b_ref_response_logits: [bsz, max_new_tokens, vocab_size]
+                rollout['b_ref_response_logits'] = b_ref_response_logits.detach()
+
+            if valid:
+                valid_rollout = {}
+                valid_rollout['messages_text'] = rollout['messages_text']
+                valid_rollout['pol_response_text'] = rollout['response_text']
+                valid_rollout['pol_rewards'] = rollout['rewards']
+
+                _, b_response_text_ref, _ = self.get_response(
+                    b_messages=b_messages, # [bsz, (chat_format)]
+                    use_prefix=False, 
+                    temperature=self.temperature, 
+                )
+                valid_rollout['ref_response_text'] = b_response_text_ref # [bsz, (response_text)]
+
+                b_rewards = self.compute_batch_reward(
+                    b_messages=b_contexts, # [bsz, str(chat_format)]
+                    b_response_text=b_response_text_ref, # [bsz, (response_text)]
+                )
+                # b_rewards: [bsz]
+                valid_rollout['ref_rewards'] = b_rewards.detach()
+
+                valid_rollout['reward_diff'] = (valid_rollout['pol_rewards'] - valid_rollout['ref_rewards']).mean().item()
+
+                valid_rollout_list += [valid_rollout]
+
+            for key in list(rollout.keys()):
+                if isinstance(rollout[key], torch.Tensor):
+                    rollout[key] = rollout[key].cpu()
+            torch.cuda.empty_cache()
+            rollout_list += [rollout]
+            # print(rollout)
+
+        if valid:
+            print("="*30)
+            for sample in valid_rollout_list:
+                for key in list(sample.keys()):
+                    if 'text' not in key:
+                        log_print("collect_rollouts", f"{highlight(key)} {sample[key]}")
+            print("="*30, '\n')
+
+            return valid_rollout_list
+
+        return rollout_list
+
+    def ppo_loss(self, 
+        rollout_list: List[Dict], 
+    ) -> Tuple[Dict[str, torch.Tensor], List[Dict[str, torch.Tensor]]]:
+        
+        # TODO check all list in dict have same len
+        iter_len = len(rollout_list)
+        # TODO if there is splited the bsz first
+
+        
+        # for sample in rollout_list:
+        #     print("="*30)
+        #     for key in list(sample.keys()):
+        #         log_print("checking", f"{highlight(key)} {sample[key]}")
+        #     print("="*30, '\n')
+        
+
+        metric_list = []
+        for sample in rollout_list:
+            for key in list(sample.keys()):
+                if isinstance(sample[key], torch.Tensor):
+                    sample[key] = sample[key].to(self.device)
+
+            metrics = {}
+            metrics['old_logp'] = sample['seq_old_logp']
+            metrics['old_values'] = sample['seq_old_values']
+            metrics['old_rewards'] = sample['rewards']
+            metrics['advantages'] = sample['advantages']
+
+            b_last_prompt_hidden_state, b_seq_logp, b_entropy, b_response_logits = self.get_full_forward(
+                b_messages_ids=sample['messages_ids'], # [bsz, (chat_format)]
+                b_response_ids=sample['response_ids'], # [bsz, max_new_tokens]
+                use_prefix=True, 
+                no_grad=False, 
+                temperature=self.temperature, 
+            )
+            # b_seq_logp: [bsz]
+            # b_entropy: [bsz]
+            # b_response_logits: [bsz, max_new_tokens, vocab_size]
+            metrics['seq_new_logp'] = b_seq_logp
+            metrics['entropy'] = b_entropy
+
+            b_seq_values = self.get_seq_values(
+                b_last_prompt_hidden_state=b_last_prompt_hidden_state, # [bsz, hidden_size]
+                no_grad=False, 
+            )
+            # b_seq_values: [bsz]
+            metrics['seq_new_values'] = b_seq_values
+
+            ###############################################
+
+            # PPO policy loss
+            metrics['ratio'] = torch.exp(b_seq_logp - sample['seq_old_logp']) # [bsz]
+            surr1 = metrics['ratio'] * sample['advantages'] # [bsz]
+            surr2 = torch.clamp(metrics['ratio'], 1 - self.clip_epsilon, 1 + self.clip_epsilon) * sample['advantages']
+            metrics['policy_loss'] = -torch.min(surr1, surr2).mean() # (scalar)
+            
+            # Value loss
+            metrics['value_loss'] = F.mse_loss(b_seq_values, sample['rewards']) # (scalar)
+
+            # KL loss
+            if self.use_kl:
+                avg_kl = self.compute_seq_avg_kl( 
+                    policy_logits=b_response_logits, 
+                    reference_logits=sample['b_ref_response_logits'], 
+                )
+                metrics['kl_loss'] = torch.max(
+                    avg_kl - self.max_kl, 
+                    torch.tensor(0.0, device=self.device)
+                ) # (scalar)
+
+            # Entropy loss
+            metrics['entropy_loss'] = -b_entropy.mean() # (scalar)
+
+            for key in list(metrics.keys()):
+                if 'loss' in key:
+                    continue
+                if isinstance(metrics[key], torch.Tensor):
+                    metrics[key] = metrics[key].cpu()
+            torch.cuda.empty_cache()
+            metric_list += [metrics]
+            
+            print("="*30)
+            for key in list(metrics.keys()):
+                log_print("ppo_loss", f"{highlight(key)} {metrics[key]}")
+            print("="*30, '\n')
+
+        losses = {
+            'policy_loss': sum(s['policy_loss'] for s in metric_list) / len(metric_list), 
+            # 'kl_loss': (sum(s['kl_loss'] for s in metric_list) / len(metric_list)) * self.klL_coef,
+            'value_loss': (sum(s['value_loss'] for s in metric_list) / len(metric_list)) * self.valueL_coef,
+            'entropy_loss': (sum(s['entropy_loss'] for s in metric_list) / len(metric_list)) * self.entropyL_coef,
         }
+        losses['total_loss'] = (
+            losses['policy_loss'] + 
+            # losses['kl_loss'] + 
+            # losses['value_loss'] + 
+            losses['entropy_loss']
+        )
+        
+        return losses, metric_list
 
-        for key in metrics:
-            log_print('compute_policy_loss', f"[{highlight(key)}] {metrics[key]}")
-            if isinstance(metrics[key], torch.Tensor):
-                if torch.isnan(metrics[key]).any() or torch.isinf(metrics[key]).any():
-                    raise f"{key} / {metrics[key]}"
-        print()
-
-        return total_loss, metrics
-    
-    def update_metrics(self,
+    def backward(self, 
+        losses: Dict
     ):
-        raise NotImplementedError
+        self.optimizer_policy.zero_grad()
+        self.optimizer_value.zero_grad()
+        losses['total_loss'].backward()
+        losses['value_loss'].backward()
+        torch.nn.utils.clip_grad_norm_(self.policy.prefix_embeddings, self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(self.value_head.parameters(), self.max_grad_norm)
+        self.optimizer_policy.step()
+        self.optimizer_value.step()
+        self.scheduler_policy.step()
+        self.scheduler_value.step()
 
     @classmethod
     def from_config(cls, 
@@ -449,47 +477,64 @@ class SingleStepPPOTrainer:
     ):
         device = str(cfg['task'].get("device"))
 
-        trainer_cfg = cfg['task']
-        clip_epsilon = float(trainer_cfg.get("clip_epsilon"))
-        entropy_coef = float(trainer_cfg.get("entropy_coef"))
-        kl_coef = float(trainer_cfg.get("kl_coef"))
-        max_grad_norm = float(trainer_cfg.get("max_grad_norm"))
-        max_kl = float(trainer_cfg.get("max_kl"))
-        value_clip = float(trainer_cfg.get("value_clip"))
-        vf_coef = float(trainer_cfg.get("vf_coef"))
-        max_token_len = int(trainer_cfg.get("max_token_len"))
-        temperature = float(trainer_cfg.get("temperature"))
+        if cfg.get("task") is not None:
+            trainer_cfg = cfg['task']
+            device = str(trainer_cfg.get("device"))
 
-        learning_rate = float(trainer_cfg.get("learning_rate"))
-        weight_decay = float(trainer_cfg.get("weight_decay"))
-        max_lr = float(trainer_cfg.get("max_lr"))
-        num_epoch = int(trainer_cfg.get("num_epoch"))
-        pct_start = float(trainer_cfg.get("pct_start"))
-        anneal_strategy = str(trainer_cfg.get("anneal_strategy"))
+            temperature = float(trainer_cfg.get("temperature"))
+            use_kl = bool(trainer_cfg.get("use_kl"))
+            clip_epsilon = float(trainer_cfg.get("clip_epsilon"))
+            max_kl = float(trainer_cfg.get("max_kl"))
+            valueL_coef = float(trainer_cfg.get("valueL_coef"))
+            klL_coef = float(trainer_cfg.get("klL_coef"))
+            entropyL_coef = float(trainer_cfg.get("entropyL_coef"))
+            max_grad_norm = float(trainer_cfg.get("max_grad_norm"))
 
-        trainer = cls(
-            policy_model=policy_model,
-            reward_model=reward_model,
+            learning_rate = float(trainer_cfg.get("learning_rate"))
+            weight_decay = float(trainer_cfg.get("weight_decay"))
+            max_lr = float(trainer_cfg.get("max_lr"))
+            num_epoch = int(trainer_cfg.get("num_epoch"))
+            pct_start = float(trainer_cfg.get("pct_start"))
+            anneal_strategy = str(trainer_cfg.get("anneal_strategy"))
 
-            clip_epsilon=clip_epsilon,
-            entropy_coef=entropy_coef,
-            kl_coef=kl_coef,
-            max_grad_norm=max_grad_norm,
-            max_kl=max_kl,
-            value_clip=value_clip,
-            vf_coef=vf_coef,
-            max_token_len=max_token_len,
-            temperature=temperature,
+        value_head = ValueHead(policy_model.hidden_size)
 
-            learning_rate=learning_rate,
+        policy_opt_config = optConfig(
+            learning_rate=learning_rate, 
             weight_decay=weight_decay, 
             max_lr=max_lr, 
             num_epoch=num_epoch, 
             steps_per_epoch=steps_per_epoch, 
             pct_start=pct_start, 
             anneal_strategy=anneal_strategy, 
+        )
 
+        value_opt_config = optConfig(
+            learning_rate=learning_rate, 
+            weight_decay=weight_decay, 
+            max_lr=max_lr, 
+            num_epoch=num_epoch, 
+            steps_per_epoch=steps_per_epoch, 
+            pct_start=pct_start, 
+            anneal_strategy=anneal_strategy, 
+        )
+
+        trainer = cls(
+            policy_model=policy_model,
+            reward_model=reward_model,
+            value_head=value_head, 
+            policy_opt_config=policy_opt_config, 
+            value_opt_config=value_opt_config, 
             device=device,
+
+            temperature=temperature,
+            use_kl=use_kl,
+            clip_epsilon=clip_epsilon, 
+            max_kl=max_kl, 
+            valueL_coef=valueL_coef, 
+            klL_coef=klL_coef, 
+            entropyL_coef=entropyL_coef, 
+            max_grad_norm=max_grad_norm, 
         )
         return trainer
     

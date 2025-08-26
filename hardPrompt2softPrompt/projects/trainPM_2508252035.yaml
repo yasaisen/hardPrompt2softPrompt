@@ -1,7 +1,7 @@
   # Copyright (c) 2025, yasaisen.
   # All rights reserved.
   # 
-  # last modified in 2506111413
+  # last modified in 2508261437
 
 model:
   reward_model:
@@ -14,6 +14,9 @@ model:
     policy_model_path: ""
     policy_model_name: "google/gemma-3-1b-it"
     prefix_prompt: "You are a tester, and your task is to chat with me more to get more replies from me. You can ask me a question and chat with me based on the question. It doesn't matter if I don't answer your question. Please try to induce me to talk more. If I have questions about the test process or the questions you asked, please use sentences to complete the question hypothesis and guide me to continue to reply to you. Let's start now."
+    max_length: 550
+    min_response_length: 50
+    grad_checkpointing: True
     torch_dtype: "float32"
 
 dataset:
@@ -22,9 +25,12 @@ dataset:
 
 task:
   root_path: ""
+  
   num_epoch: 10
-  batch_size: 2
+  batch_size: 4
+  mini_batch: 2
   sample_loop: 3
+  
   learning_rate: 1e-3
   weight_decay: 1e-4
   max_lr: 1e-3
@@ -32,14 +38,13 @@ task:
   anneal_strategy: "cos"
   
   clip_epsilon: 0.2
-  entropy_coef: 0.03
-  kl_coef: 0.5
+  max_kl: 0.1
+  valueL_coef: 0.3
+  klL_coef: 0.5
+  entropyL_coef: 0.01
   max_grad_norm: 1.0
-  max_kl: 0.05
-  value_clip: 0.2
-  vf_coef: 0.3
-  
-  max_token_len: 600
+
+  use_kl: False
   temperature: 1.0
   
   device: "cuda"

@@ -5,7 +5,7 @@
  This file is part of a project licensed under the MIT License.
  See the LICENSE file in the project root for more information.
  
- last modified in 2508031527
+ last modified in 2508261410
 """
 
 import torch
@@ -13,6 +13,9 @@ import warnings
 from tqdm import tqdm
 from typing import List, Dict
 import os
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
+import random
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", message=".*config.hidden_act.*")
@@ -23,79 +26,124 @@ from hardPrompt2softPrompt.models.rewardModel.modeling_rewardModel import Compar
 from hardPrompt2softPrompt.models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 from hardPrompt2softPrompt.trainer.singleStepPPOTrainer.building_singleStepPPOTrainer import SingleStepPPOTrainer
 
+def metric_writer(
+    metric_list: List, 
+    writer: SummaryWriter, 
+    global_step: int, 
+    bsz: int, 
+):
+    for metric in metric_list:
+        for key in list(metric.keys()):
+            if 'text' in key:
+                continue
+            current = metric[key]
+            if isinstance(current, float):
+                current = torch.tensor([current] * bsz)
+            writer.add_scalar(key, current.mean(), global_step)
+            global_step += 1
+    return global_step
 
-def batch_step(
+def train_batch_step(
     ppo_trainer: SingleStepPPOTrainer,
-    train_batch_samples: List[Dict[str, str]],
-    valid_loader: List[Dict[str, str]],
+    train_dataset: List[List[Dict[str, str]]],
     epoch_idx: int, 
-    batch_idx:int, 
     cfg_handler: ConfigHandler,
-    ppo_Kepochs: int = 8,
-) -> List[Dict[str, float]]:
+    writer: SummaryWriter, 
+    train_global_step: int,
+    bsz: int, 
+    mini_batch: int = 10, 
+    ppo_Kepochs: int = 3,
+):
     ppo_trainer.optimizer_policy.zero_grad()
     ppo_trainer.optimizer_value.zero_grad()
 
     train_metrics_list = []
 
-    log_print(f'{highlight("batch_step")}', f"[train] ({epoch_idx}) sampling")
-    sample_results, metrics = ppo_trainer.sample_init(
-        context=train_batch_samples,
-        messages=train_batch_samples, 
-        valid=False, 
-        output_response=False, 
-    )
-    metrics['epoch_idx'] = epoch_idx
-    cfg_handler.save_result(result=metrics)
+    random.shuffle(train_dataset)
+    for start in range(0, len(train_dataset), mini_batch):
+        end = min(start + mini_batch, len(train_dataset))
+        running_dataset = train_dataset[start: end]
 
-    for Kepoch_idx in range(ppo_Kepochs):
-        log_print(f'{highlight("batch_step")}', f"[train] ({epoch_idx}-{Kepoch_idx}) Kepoch running")
-        loss, metrics = ppo_trainer.compute_policy_loss(
-            sample_results=sample_results, 
-            valid=False, 
-            output_response=False, 
+        log_print(f'{highlight("batch_step")}', f"[train] ({epoch_idx}) sampling")
+        rollout_list = ppo_trainer.collect_rollouts(
+            b_dataset=running_dataset, 
         )
-        metrics['epoch_idx'] = epoch_idx
-        metrics['Kepoch_idx'] = Kepoch_idx
+
+        metrics = {
+            'epoch_idx': epoch_idx, 
+            'state': 'rollout', 
+            'rollout_list': rollout_list, 
+        }
         cfg_handler.save_result(result=metrics)
         train_metrics_list += [metrics]
 
+        for Kepoch_idx in range(ppo_Kepochs):
+            log_print(f'{highlight("batch_step")}', f"[train] ({epoch_idx}) updating")
+            losses, metric_list = ppo_trainer.ppo_loss(
+                rollout_list=rollout_list, 
+            )
+            ppo_trainer.backward(losses=losses)
 
-        ppo_trainer.optimizer_policy.zero_grad()
-        ppo_trainer.optimizer_value.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(ppo_trainer.policy.prefix_embeddings, ppo_trainer.max_grad_norm)
-        torch.nn.utils.clip_grad_norm_(ppo_trainer.value_head.parameters(), ppo_trainer.max_grad_norm)
-        ppo_trainer.optimizer_policy.step()
-        ppo_trainer.optimizer_value.step()
-        ppo_trainer.scheduler_policy.step()
-        ppo_trainer.scheduler_value.step()
+            train_global_step = metric_writer(
+                metric_list=metric_list, 
+                writer=writer, 
+                global_step=train_global_step, 
+                bsz=bsz, 
+            )
 
+            metrics = {
+                'epoch_idx': epoch_idx, 
+                'state': 'train', 
+                'Kepoch_idx': Kepoch_idx, 
+                'metric_list': metric_list, 
+            }
+            cfg_handler.save_result(result=metrics)
+            train_metrics_list += [metrics]
 
+    torch.cuda.empty_cache()
+    return train_metrics_list, train_global_step
+
+def valid_batch_step(
+    ppo_trainer: SingleStepPPOTrainer,
+    valid_dataset: List[List[Dict[str, str]]],
+    epoch_idx: int, 
+    cfg_handler: ConfigHandler,
+    writer: SummaryWriter, 
+    valid_global_step: int,
+    bsz: int, 
+):
     valid_metrics_list = []
-    ppo_trainer.optimizer_policy.zero_grad()
-    ppo_trainer.optimizer_value.zero_grad()
-    for valid_batch_samples in tqdm(valid_loader):
-        log_print(f'{highlight("batch_step")}', f"[valid] ({epoch_idx}) / {len(valid_batch_samples)}")
-        _, metrics = ppo_trainer.sample_init(
-            context=valid_batch_samples,
-            messages=valid_batch_samples, 
-            valid=True, 
-            output_response=True, 
-        )
-        metrics['epoch_idx'] = epoch_idx
-        cfg_handler.save_result(result=metrics)
-        valid_metrics_list += [metrics]
+    log_print(f'{highlight("batch_step")}', f"[valid] ({epoch_idx}) {len(valid_dataset)}")
+    valid_rollout_list = ppo_trainer.collect_rollouts(
+        b_dataset=valid_dataset, 
+        valid=True, 
+    )
+
+    # valid_global_step = metric_writer(
+    #     metric_list=valid_rollout_list, 
+    #     writer=writer, 
+    #     global_step=valid_global_step, 
+    #     bsz=bsz, 
+    # )
+
+    metrics = {
+        'epoch_idx': epoch_idx, 
+        'state': 'valid', 
+        'valid_rollout_list': valid_rollout_list, 
+    }
+    cfg_handler.save_result(result=metrics)
+    valid_metrics_list += [metrics]
     
     torch.cuda.empty_cache()
-    return train_metrics_list, valid_metrics_list
+    return valid_metrics_list, valid_global_step
 
 def main():
     set_seed()
     cfg_handler = ConfigHandler.get_cfg()
     num_epoch = cfg_handler.cfg['task'].get("num_epoch")
     bsz = cfg_handler.cfg['task'].get("batch_size")
-    sample_loop = cfg_handler.cfg['task'].get("sample_loop")
+    ppo_Kepochs = cfg_handler.cfg['task'].get("sample_loop")
+    mini_batch = cfg_handler.cfg['task'].get("mini_batch")
 
     train_dataset, val_dataset = singleStepPPO_v1_Dataset.from_config(cfg_handler.cfg)
     train_loader = get_loader(
@@ -104,7 +152,7 @@ def main():
     )
     valid_loader = get_loader(
         dataset=val_dataset,
-        bsz=2,
+        bsz=bsz,
     )
 
     reward_model = ComparativeRewardModel.from_config(cfg_handler.cfg)
@@ -112,48 +160,57 @@ def main():
     ppo_trainer = SingleStepPPOTrainer.from_config(cfg_handler.cfg, 
         reward_model=reward_model,
         policy_model=policy_model,
-        steps_per_epoch=len(train_dataset) * sample_loop,
+        steps_per_epoch=len(train_dataset) * ppo_Kepochs,
     )
+
+    writer = SummaryWriter(log_dir=cfg_handler.save_path)
 
     print("Start training...")
     best_reward = -5e9
-    avoid_key_list = ['context_messages', 'policy_response', 'reference_response', 'step', 'state']
+    avoid_key_list = ['messages_text', 'pol_response_text', 'ref_response_text']
+    train_global_step = 0
+    valid_global_step = 0
     for epoch_idx in range(num_epoch):
         
-        # TODO add bsz
-        for batch_idx, train_batch_samples in enumerate(train_loader):
-            train_metrics_sublist, valid_metrics_sublist = batch_step(
-                ppo_trainer=ppo_trainer,
-                train_batch_samples=train_batch_samples,
-                valid_loader=valid_loader,
-                ppo_Kepochs=sample_loop,
-                cfg_handler=cfg_handler,
-                epoch_idx=epoch_idx, 
-                batch_idx=batch_idx, 
-            )
+        train_metrics_list, train_global_step = train_batch_step(
+            ppo_trainer=ppo_trainer,
+            train_dataset=train_loader,
+            ppo_Kepochs=ppo_Kepochs,
+            mini_batch=mini_batch, 
+            cfg_handler=cfg_handler,
+            epoch_idx=epoch_idx, 
+            writer=writer, 
+            train_global_step=train_global_step, 
+            bsz=bsz, 
+        )
+        valid_metrics_list, valid_global_step = valid_batch_step(
+            ppo_trainer=ppo_trainer,
+            valid_dataset=valid_loader,
+            epoch_idx=epoch_idx, 
+            cfg_handler=cfg_handler,
+            writer=writer, 
+            valid_global_step=valid_global_step,
+            bsz=bsz, 
+        )
 
-            # train_metrics_avg = calu_dict_avg(
-            #     local_metrics_list=train_metrics_sublist, 
-            #     epoch_idx=epoch_idx,
-            #     state='train',
-            #     avoid_key_list=avoid_key_list,
-            #     show=True,
-            # )
-            valid_metrics_avg = calu_dict_avg(
-                local_metrics_list=valid_metrics_sublist, 
-                epoch_idx=epoch_idx,
-                state='valid',
-                avoid_key_list=avoid_key_list,
-                show=True,
-            )
-            log_print(f'{highlight()}', valid_metrics_avg['diff_reward'])
-            if valid_metrics_avg['diff_reward'] > best_reward:
-                best_reward = valid_metrics_avg['diff_reward']
-                cfg_handler.save_weight({
-                    'epoch_idx': epoch_idx, 
-                    'diff_reward': valid_metrics_avg['diff_reward'], 
-                    'prefix_embeddings_state_dict': ppo_trainer.policy.prefix_embeddings.detach(),
-                })
+        # valid_metrics_avg = calu_dict_avg(
+        #     local_metrics_list=[s['valid_rollout_list'] for s in valid_metrics_list], 
+        #     epoch_idx=epoch_idx,
+        #     state='valid',
+        #     avoid_key_list=avoid_key_list,
+        #     show=True,
+        # )
+        # log_print(f'{highlight()}', valid_metrics_avg['diff_reward'])
+        # if valid_metrics_avg['diff_reward'] > best_reward:
+        #     best_reward = valid_metrics_avg['diff_reward']
+        #     cfg_handler.save_weight({
+        #         'epoch_idx': epoch_idx, 
+        #         'diff_reward': valid_metrics_avg['diff_reward'], 
+        #         'prefix_embeddings_state_dict': ppo_trainer.policy.prefix_embeddings.detach(),
+        #         'prefix_ids': ppo_trainer.policy.prefix_ids,
+        #         'value_head_state_dict': ppo_trainer.value_head.parameters()
+        #           # TODO value weight saving
+        #     })
 
     print("Training finished.")
 

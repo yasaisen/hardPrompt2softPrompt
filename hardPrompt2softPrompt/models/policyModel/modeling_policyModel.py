@@ -32,12 +32,15 @@ WEIGHT_MAPPING_DICT = {
 class PrefixTuningPolicyModel(nn.Module):
     def __init__(self, 
         model_name: str, 
+
         prefix_prompt: str = None, 
-        pretrain_path: str = None, 
+        checkpoint_path: str = None, 
+        model_max_length: int = None, 
+        min_response_length: int = None, 
         gradient_checkpointing: bool = False,
         device: str = "cuda", 
         torch_dtype = torch.float32,
-        silent: bool = True,
+        silent: bool = False,
     ):
         super().__init__()
         self.state_name = 'PrefixTuningPolicyModel'
@@ -45,58 +48,29 @@ class PrefixTuningPolicyModel(nn.Module):
         # print()
         log_print(self.state_name, f"Building...", silent)
 
-        self.torch_dtype = torch_dtype
-        self.model_name = model_name
-
-        if self.model_name == 'google/gemma-3-1b-it':
-            self.base_model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, 
-                # attn_implementation="flash_attention_2", 
-                torch_dtype=self.torch_dtype
-            )
-
-        elif self.model_name == 'google/gemma-3-4b-it':
-            self.base_model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, 
-                # attn_implementation="flash_attention_2", 
-                torch_dtype=self.torch_dtype
-            ).language_model
-
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        if self.tokenizer.pad_token is None:
-            log_print(self.state_name, f"pad_token=None", silent)
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.base_model.config.gradient_checkpointing = gradient_checkpointing
-
-        self.prefix_check_ids = [2, 105, 2364, 107, 7617, 108, 3041, 106, 107]
-        self.prefix_check_tensor_len = len(self.prefix_check_ids)
-        self.prefix_lock_idx = 4
+        self.init_model_and_tokenizer( 
+            model_name=model_name, 
+            torch_dtype=torch_dtype, 
+            gradient_checkpointing=gradient_checkpointing, 
+            model_max_length=model_max_length, 
+        )
+        self.min_response_length = min_response_length
+        
+        self.init_prefix_template()
 
         if prefix_prompt is not None:
-            log_print(self.state_name, f"prefix_prompt={prefix_prompt}", silent)
-            self.prefix_prompt = prefix_prompt
-            self.prefix_ids = self.tokenizer.encode(self.prefix_prompt, add_special_tokens=False, return_tensors="pt").to(torch.long)
-            self.prefix_length = int(self.prefix_ids.shape[1])
-            # self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
-            self.max_length = self.tokenizer.model_max_length - self.prefix_length
-                
-            self.hidden_size = self.base_model.config.hidden_size
-            word_embeds = self.base_model.model.embed_tokens(self.prefix_ids)
+            self.init_prefixPrompt2embedding( 
+                prefix_prompt=prefix_prompt, 
+                silent=silent, 
+            )
+        if checkpoint_path is not None:
+            self.init_checkPoint2embedding( 
+                checkpoint_path=checkpoint_path, 
+                silent=silent, 
+            )
 
-            self.prefix_embeddings = nn.Parameter(word_embeds.detach().clone().squeeze(), requires_grad=True)
-            log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}", silent)
-
-        if pretrain_path is not None:
-            log_print(self.state_name, f"pretrain_path={pretrain_path}", silent)
-            ckpt = torch.load(pretrain_path, weights_only=True)
-            self.prefix_embeddings = nn.Parameter(ckpt['prefix_embeddings_state_dict'])
-            self.prefix_length = int(self.prefix_embeddings.shape[0])
-            self.prefix_ids = torch.tensor([[108] * self.prefix_length], dtype=torch.long).to(self.device)
-            # self.max_length = self.base_model.config.max_position_embeddings - self.prefix_length
-            self.max_length = self.tokenizer.model_max_length - self.prefix_length
-            log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}", silent)
-
-        log_print(self.state_name, f"max_length={self.max_length}", silent)
+        log_print(self.state_name, f"prefix_shape={self.prefix_embeddings.shape}", silent)
+        log_print(self.state_name, f"max_length={self.max_input_length}", silent)
 
         for param in self.parameters():
             param.requires_grad = False
@@ -109,39 +83,188 @@ class PrefixTuningPolicyModel(nn.Module):
         self.to(self.device)
         log_print(self.state_name, f"...Done\n", silent)
 
+    def init_model_and_tokenizer(self, 
+        model_name: str, 
+        torch_dtype = torch.float32,
+        gradient_checkpointing: bool = False, 
+        model_max_length: int = None, 
+    ):
+        """
+        set: [`base_model`, `tokenizer`, `model_max_length`]
+        """
+        self.model_name = model_name
+        self.base_model = AutoModelForCausalLM.from_pretrained(
+            self.model_name, 
+            # attn_implementation="flash_attention_2", 
+            torch_dtype=torch_dtype
+        )
+        if self.model_name == 'google/gemma-3-4b-it':
+            self.base_model = self.base_model.language_model
+        self.base_model.config.gradient_checkpointing = gradient_checkpointing
+        self.hidden_size = self.base_model.config.hidden_size
+
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.model_max_length = model_max_length
+        if self.model_max_length is None:
+            self.model_max_length = self.tokenizer.model_max_length
+            # self.model_max_length = self.base_model.config.max_position_embeddings
+
+    def init_prefixPrompt2embedding(self, 
+        prefix_prompt: str, 
+        silent: bool = True, 
+    ):
+        """
+        set: [`prefix_embeddings`, `prefix_length`, `max_input_length`, `prefix_ids`]
+        """
+        log_print(self.state_name, f"prefix_prompt={prefix_prompt}", silent)
+        self.prefix_prompt = prefix_prompt
+
+        self.prefix_ids = self.tokenizer.encode(
+            self.prefix_prompt, 
+            add_special_tokens=False, 
+            return_tensors="pt"
+        ).to(torch.long)
+        self.prefix_embeddings = nn.Parameter(
+            self.base_model.model.embed_tokens(
+                self.prefix_ids
+            ).detach().clone().squeeze(), 
+            requires_grad=True, 
+        )
+
+        self.prefix_length = int(self.prefix_ids.shape[1])
+        self.max_input_length = self.model_max_length - self.prefix_length
+
+    def init_checkPoint2embedding(self, 
+        checkpoint_path: str, 
+        silent: bool = True, 
+    ):
+        """
+        set: [`prefix_embeddings`, `prefix_length`, `max_input_length`, `prefix_ids`]
+        """
+        log_print(self.state_name, f"checkpoint_path={checkpoint_path}", silent)
+        ckpt = torch.load(checkpoint_path, weights_only=True)
+
+        self.prefix_ids = ckpt['prefix_ids']
+        self.prefix_embeddings = nn.Parameter(
+            ckpt['prefix_embeddings_state_dict'], 
+            requires_grad=True, 
+        )
+
+        self.prefix_length = int(self.prefix_ids.shape[1])
+        self.max_input_length = self.model_max_length - self.prefix_length
+
+    def init_prefix_template(self,
+        prefix_check_ids: List = [2, 105, 2364, 107, 7617, 108, 3041, 106, 107], 
+        prefix_lock_idx: int = 4, 
+    ):
+        """
+        set: [`prefix_template_messages`, `prefix_check_ids`, `template_start_ids`, `template_end_ids`, `template_start_ids_len`, `template_end_ids_len`]
+        """
+        self.prefix_template_messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": "temp"},]
+            },
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "start"},]
+            }
+        ]
+        # prompt_text = self.tokenizer.apply_chat_template(
+        #     [self.prefix_template_messages],
+        #     add_generation_prompt=True,
+        #     tokenize=False
+        # )
+        # self.prefix_check_ids = self.tokenizer(
+        #     [prompt_text[0][5:]], # remove <bos> that will be given next time
+        #     padding=True,
+        #     truncation=True,
+        #     return_tensors="pt"
+        # )['input_ids']
+        
+        self.prefix_check_ids = self.tokenizer.apply_chat_template(
+            [self.prefix_template_messages],
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        )['input_ids'].tolist()[0] # [2, 105, 2364, 107, 7617, 108, 3041, 106, 107, 105, 4368, 107]
+        # log_print('tokenizer', f"[{highlight('input_ids')}] {self.prefix_check_ids}")
+
+        # self.prefix_check_ids = prefix_check_ids
+        self.prefix_check_tensor_len = len(self.prefix_check_ids)
+        self.prefix_lock_idx = prefix_lock_idx
+
+        self.template_start_ids = torch.tensor([self.prefix_check_ids[:self.prefix_lock_idx]], dtype=torch.long).to(self.device) # system
+        self.template_start_ids_len = int(self.template_start_ids.shape[1])
+
+        self.template_end_ids = torch.tensor([self.prefix_check_ids[self.prefix_lock_idx + 1:]], dtype=torch.long).to(self.device)
+        self.template_end_ids_len = int(self.template_end_ids.shape[1])
+
+    def prefix_checker(self, 
+        input_ids: torch.Tensor, 
+    ):
+        check_tensor = torch.tensor(self.prefix_check_ids, dtype=torch.long).to(self.device)
+        for bsz_idx in range(input_ids.shape[0]):
+            if not torch.equal(input_ids[bsz_idx, :self.prefix_check_tensor_len], check_tensor):
+                # raise ValueError(f"Input input_ids {bsz_idx} with not prefix [\n{self.tokenizer.decode(check_tensor.tolist()[0], skip_special_tokens=False)}\n] but [\n{self.tokenizer.decode(input_ids[bsz_idx, :self.prefix_check_tensor_len].tolist(), skip_special_tokens=False)}\n]")
+                raise ValueError(f"Input input_ids {bsz_idx} with not prefix [\n{check_tensor}\n] but [\n{input_ids[bsz_idx, :self.prefix_check_tensor_len]}\n]")
+
+    def tokenize_maxlencut_checker(self, 
+        prompt_text: str, 
+    ):
+        input_ids = self.tokenizer(
+            prompt_text,
+            padding=True,
+            return_tensors="pt"
+        )['input_ids'][0]
+        # log_print('tokenize_maxlencut_checker', f"[{highlight('len(input_ids)')}] {len(input_ids)}")
+        if len(input_ids) > (self.max_input_length - self.min_response_length):
+            raise ValueError(f"Input length {len(input_ids)} exceeds max_input_length {(self.max_input_length - self.min_response_length)}")
+
+    @torch.no_grad()
     def generate_response_with_batch(self,
-        input_ids: torch.Tensor,  # [bsz, seq_len]
-        attention_mask: torch.Tensor = None,  # [bsz, seq_len]
-        max_new_tokens: int = 50,
+        input_ids: torch.Tensor, # [bsz, floating_prompt_len]
+        attention_mask: torch.Tensor = None, # [bsz, floating_prompt_len]
         use_prefix: bool = True,
         temperature: float = 1.0
     ):
-        batch_size, orig_len = input_ids.shape  # [batch_size, seq_len_padded]
+        bsz, floating_prompt_len = input_ids.shape  # [bsz, floating_prompt_len]
+        max_new_tokens = self.max_input_length - floating_prompt_len
 
         pad_token_id = self.tokenizer.pad_token_id
 
         if attention_mask is None:
             attention_mask = (input_ids != pad_token_id).long()
 
-        # Preallocate tensors to avoid dynamic resizing which previously
-        # caused index errors when the generated sequence length reached the
-        # current tensor capacity.
-        max_length = orig_len + max_new_tokens
-
-        if attention_mask.shape[1] < max_length:
-            pad_mask = torch.zeros((batch_size, max_length - attention_mask.shape[1]),
-                                   device=attention_mask.device,
-                                   dtype=attention_mask.dtype)
-            attention_mask = torch.cat([attention_mask, pad_mask], dim=1)
-
-        all_generated = torch.full((batch_size, max_length), pad_token_id,
-                                   dtype=input_ids.dtype, device=input_ids.device)
-        all_generated[:, :orig_len] = input_ids
-
+        if attention_mask.shape[1] < self.max_input_length:
+            pad_mask = torch.zeros(
+                (bsz, self.max_input_length - attention_mask.shape[1]),
+                device=attention_mask.device,
+                dtype=attention_mask.dtype
+            )
+            attention_mask = torch.cat([attention_mask, pad_mask], dim=1) # [bsz, max_input_length]
         seq_lengths = attention_mask.sum(dim=1)
 
-        unfinished_sequences = torch.ones(batch_size, dtype=torch.long, device=input_ids.device)
+        all_generated = torch.full( # [bsz, max_input_length]
+            (bsz, self.max_input_length), 
+            pad_token_id,
+            dtype=input_ids.dtype, 
+            device=input_ids.device
+        )
+        all_generated[:, :floating_prompt_len] = input_ids
 
+        only_b_response = torch.full( # [bsz, max_input_length]
+            (bsz, self.max_input_length),
+            pad_token_id,
+            dtype=input_ids.dtype, 
+            device='cpu'
+        )
+        
+        unfinished_sequences = torch.ones(bsz, dtype=torch.long, device=input_ids.device)
         for step in range(max_new_tokens):
             current_max_len = int(seq_lengths.max().item())
 
@@ -151,28 +274,28 @@ class PrefixTuningPolicyModel(nn.Module):
                     attention_mask=attention_mask[:, :current_max_len],
                     use_prefix=use_prefix,
                     output_hidden_states=False,
-                    stage='decode',
                 )
                 logits = logits[:, (self.prefix_length - 1):, :]
 
             next_token_logits = []
-            for i in range(batch_size):
+            for i in range(bsz):
                 curr_length = int(seq_lengths[i].item())
                 next_token_logits.append(logits[i, curr_length - 1:curr_length])
 
             next_token_logits = torch.cat(next_token_logits, dim=0)
 
-            next_tokens = next_token_logits.argmax(dim=-1)  # [batch_size]
+            next_tokens = next_token_logits.argmax(dim=-1)  # [bsz]
 
-            for i in range(batch_size):
+            for i in range(bsz):
                 if unfinished_sequences[i] == 1:
                     curr_length = int(seq_lengths[i].item())
 
                     # Ensure we do not write beyond the preallocated buffer
-                    if curr_length >= max_length:
+                    if curr_length >= self.max_input_length:
                         continue
-
+                    
                     all_generated[i, curr_length] = next_tokens[i]
+                    only_b_response[i, curr_length] = next_tokens[i]
 
                     seq_lengths[i] += 1
                     attention_mask[i, curr_length] = 1
@@ -190,68 +313,71 @@ class PrefixTuningPolicyModel(nn.Module):
                 break
 
         final_max_len = int(seq_lengths.max().item())
-        batch_outputs = self.tokenizer.batch_decode(
-            all_generated[:, :final_max_len], skip_special_tokens=True
-        )
 
-        return batch_outputs, all_generated[:, :final_max_len]
+        del all_generated
+        b_response_text = self.tokenizer.batch_decode(
+            only_b_response, skip_special_tokens=True
+        )
+        batched_inputs = self.tokenizer(
+            b_response_text,
+            padding=True,
+            return_tensors="pt"
+        )
+        batched_inputs = {
+            k: (v.to(torch.bfloat16) if k != "input_ids" else v).to(self.device)
+            for k, v in batched_inputs.items()
+        }
+        b_response_ids = batched_inputs["input_ids"]
+        # b_response_text: [bsz, (response_text)]
+        # b_response_ids: [bsz, max_input_length - floating_prompt_len]
+        return b_response_text, b_response_ids
 
     def full_forward(self, 
-        messages_ids: torch.Tensor,
-        response_ids: torch.Tensor,
+        messages_ids: torch.Tensor, # [bsz, floating_prompt_len]
+        response_ids: torch.Tensor, # [bsz, max_input_length - floating_prompt_len]
         use_prefix: bool,
         temperature: float = 1.0
     ):
         combined_ids = torch.cat([messages_ids, response_ids], dim=1)
-        # highlight_show('[full_forward] input_ids(decoded)', self.tokenizer.decode(combined_ids.tolist()[0], skip_special_tokens=False))
-
         logits, hidden_states = self(
             input_ids=combined_ids, 
             use_prefix=use_prefix,
             output_hidden_states=True,
         )
+        last_prompt_hidden_state = hidden_states[:, messages_ids.shape[1] - 1 + self.prefix_length - 1, :].detach() # [bsz, hidden_size]
+
         response_logits = logits[:, -response_ids.shape[1]:]
-        
         logp_gen = F.log_softmax(response_logits / temperature, dim=-1)
         old_logp = logp_gen.gather(
             -1, response_ids.unsqueeze(-1)
-        ).squeeze(-1).detach()                  # [B, L_g]
-        seq_old_logp = old_logp.sum(dim=1)      # [B]
+        ).squeeze(-1).detach()
+        seq_old_logp = old_logp.sum(dim=1)
 
         probs = torch.exp(logp_gen)
         entropy = -(probs * logp_gen).sum(dim=-1).mean()
 
-        return response_logits, hidden_states, seq_old_logp, entropy
+        # last_prompt_hidden_state: [bsz, hidden_size]
+        # seq_old_logp: [bsz]
+        # entropy: [bsz]
+        # response_logits: [bsz, max_new_tokens, vocab_size]
+        return last_prompt_hidden_state, seq_old_logp, entropy, response_logits
 
     def forward(self,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor = None,
         use_prefix: bool = True,
         output_hidden_states: bool = False,
-        prefix_checker: bool = True,
-        stage: str = '',
     ):
         # highlight_show('[forward] input_ids(decoded)', self.tokenizer.decode(input_ids.tolist()[0], skip_special_tokens=False))
 
-        template_start = torch.tensor([self.prefix_check_ids[:self.prefix_lock_idx]], dtype=torch.long).to(self.device) # system
-        template_end = torch.tensor([self.prefix_check_ids[self.prefix_lock_idx + 1:]], dtype=torch.long).to(self.device)
-        template_start_len = int(template_start.shape[1])
-        template_end_len = int(template_end.shape[1])
-
-        # log_print('forward', f"[{highlight('input_ids')}] {input_ids.shape} {input_ids}")
-
-        check_tensor = torch.tensor(self.prefix_check_ids, dtype=torch.long).to(self.device)
-        for bsz_idx in range(input_ids.shape[0]):
-            if not torch.equal(input_ids[bsz_idx, :self.prefix_check_tensor_len], check_tensor):
-                # raise ValueError(f"Input input_ids {bsz_idx} with not prefix [\n{self.tokenizer.decode(check_tensor.tolist()[0], skip_special_tokens=False)}\n] but [\n{self.tokenizer.decode(input_ids[bsz_idx, :self.prefix_check_tensor_len].tolist(), skip_special_tokens=False)}\n]")
-                raise ValueError(f"Input input_ids {bsz_idx} with not prefix [\n{check_tensor}\n] but [\n{input_ids[bsz_idx, :self.prefix_check_tensor_len]}\n]")
-
+        self.prefix_checker(input_ids=input_ids)
         cutted_input_ids = input_ids[:, self.prefix_check_tensor_len:]
         batch_size, seq_len = cutted_input_ids.shape
+
         if attention_mask is None:
             attention_mask = torch.ones(
                 batch_size, 
-                template_start_len + self.prefix_length + template_end_len + seq_len, 
+                self.template_start_ids_len + self.prefix_length + self.template_end_ids_len + seq_len, 
                 dtype=torch.long, 
                 device=cutted_input_ids.device
             )
@@ -263,15 +389,15 @@ class PrefixTuningPolicyModel(nn.Module):
         self.prefix_ids = self.prefix_ids.to(self.device)
         self.prefix_embeddings = self.prefix_embeddings.to(self.device)
 
-        formaled_input_ids = torch.cat([template_start, self.prefix_ids, template_end], dim=1)
+        formaled_input_ids = torch.cat([self.template_start_ids, self.prefix_ids, self.template_end_ids], dim=1)
         # highlight_show('input_ids(decoded)', self.tokenizer.decode(torch.cat([formaled_input_ids, cutted_input_ids], dim=1).tolist()[0], skip_special_tokens=False))
         formaled_inputs_embeds = self.base_model.model.embed_tokens(formaled_input_ids)
         
         if use_prefix:
             formaled_inputs_embeds = torch.cat([
-                formaled_inputs_embeds[:, :template_start_len], 
+                formaled_inputs_embeds[:, :self.template_start_ids_len], 
                 self.prefix_embeddings.unsqueeze(0), 
-                formaled_inputs_embeds[:, -template_end_len:]
+                formaled_inputs_embeds[:, -self.template_end_ids_len:]
             ], dim=1)
 
         inputs_embeds = torch.cat([
@@ -295,50 +421,29 @@ class PrefixTuningPolicyModel(nn.Module):
             return logits
 
     def chat_template_tokenizer(self, 
-            chat_dicts: List[List[Dict[str, str]]], 
-            max_length: int, 
-        ):
-        max_length = max_length - self.prefix_length
-        prompt_text_list = []
-        for chat_dict in chat_dicts:
-            messages = [
-                [
-                    {
-                        "role": "system",
-                        "content": [{"type": "text", "text": "temp"},]
-                    },
-                    {
-                        "role": "user",
-                        "content": [{"type": "text", "text": "start"},]
-                    }
-                ] + chat_dict["messages"]
-            ]
+        b_messages, # [bsz, (chat_format)]
+    ):
+        prompt_text_list = [] # [bsz, (formated_chat_str)]
+        for context_messages in b_messages:
+            messages = [self.prefix_template_messages + context_messages] # List[List[Dict]]
             
             prompt_text = self.tokenizer.apply_chat_template(
                 messages,
                 add_generation_prompt=True,
                 tokenize=False
             )
+            prompt_text = [prompt_text[0][5:]] # remove <bos> that will be given next time
+            self.tokenize_maxlencut_checker(prompt_text=prompt_text)
 
-            input_ids = self.tokenizer(
-                prompt_text,
-                padding=True,
-                truncation=True,
-                return_tensors="pt"
-            )['input_ids']
-            if len(input_ids[0]) > max_length:
-                raise ValueError(f"Input length {len(input_ids[0])} exceeds max_length {self.max_length}")
-
-            # log_print('chat_template_tokenizer', f"[{highlight('prompt_text')}] {type(prompt_text[0])} {len(prompt_text[0])}")
-            prompt_text_list += [prompt_text[0][5:]]
+            prompt_text_list += prompt_text
 
         temp_padding_side = self.tokenizer.padding_side
         self.tokenizer.padding_side = 'right'
         batched_inputs = self.tokenizer(
-            prompt_text_list,
-            padding=True, # "max_length",
-            truncation=True,
-            max_length=max_length, 
+            prompt_text_list, # [bsz, (formated_chat_str)]
+            padding=True,
+            # truncation=True,
+            # max_length=self.max_input_length, 
             return_tensors="pt"
         )
         self.tokenizer.padding_side = temp_padding_side
@@ -350,10 +455,7 @@ class PrefixTuningPolicyModel(nn.Module):
         
         batched_input_ids = batched_inputs["input_ids"]
         batched_attention_mask = batched_inputs["attention_mask"]
-        # log_print('chat_template_tokenizer', f"[{highlight('batched_input_ids')}] {batched_input_ids.shape}")
-        # log_print('chat_template_tokenizer', f"[{highlight('batched_attention_mask')}] {batched_attention_mask.shape}")
-        
-        # log_print('chat_template_tokenizer', f"[{highlight('end')}]")
+
         return batched_input_ids, batched_attention_mask
     
     @classmethod
@@ -375,16 +477,22 @@ class PrefixTuningPolicyModel(nn.Module):
                 policy_model_path = os.path.join(root_path, policy_model_cfg.get("policy_model_path"))
             policy_model_name = str(policy_model_cfg.get("policy_model_name"))
             prefix_prompt = str(policy_model_cfg.get("prefix_prompt"))
+            model_max_length = int(policy_model_cfg.get("max_length"))
+            min_response_length = int(policy_model_cfg.get("min_response_length"))
+            gradient_checkpointing = bool(policy_model_cfg.get("grad_checkpointing"))
             torch_dtype = dtype_map[str(policy_model_cfg.get("torch_dtype"))]
 
         model = cls(
             model_name=policy_model_name,
             prefix_prompt=prefix_prompt, 
-            pretrain_path=policy_model_path, 
-            gradient_checkpointing=False,
+            checkpoint_path=policy_model_path, 
+            model_max_length=model_max_length, 
+            min_response_length=min_response_length, 
+            gradient_checkpointing=gradient_checkpointing,
             torch_dtype=torch_dtype,
             device=device, 
         )
+
         return model
 
     @classmethod
@@ -396,8 +504,8 @@ class PrefixTuningPolicyModel(nn.Module):
             print('downloading from huggingface...')
             from huggingface_hub import hf_hub_download
             ckpt_path = hf_hub_download(
-                repo_id   = 'yasaisen/hardPrompt2softPrompt',
-                filename  = WEIGHT_MAPPING_DICT[model_name],
+                repo_id = 'yasaisen/hardPrompt2softPrompt',
+                filename = WEIGHT_MAPPING_DICT[model_name],
                 # revision  = revision,
                 # cache_dir = cache_dir, 
                 # resume_download = True, 
@@ -407,7 +515,7 @@ class PrefixTuningPolicyModel(nn.Module):
 
         model = cls(
             model_name=model_name,
-            pretrain_path=ckpt_path, 
+            checkpoint_path=ckpt_path, 
         )
         return model
 
