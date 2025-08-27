@@ -479,7 +479,7 @@ class SingleStepPPOTrainer:
         losses['total_loss'] = (
             losses['policy_loss'] + 
             # losses['kl_loss'] + 
-            # losses['value_loss'] + 
+            losses['value_loss'] + 
             losses['entropy_loss']
         )
         # losses['total_loss'] = losses['policy_loss']
@@ -492,7 +492,7 @@ class SingleStepPPOTrainer:
         self.optimizer_policy.zero_grad()
         self.optimizer_value.zero_grad()
         losses['total_loss'].backward()
-        losses['value_loss'].backward()
+        # losses['value_loss'].backward()
         torch.nn.utils.clip_grad_norm_(
             (p for p in self.policy.parameters() if p.requires_grad),
             self.max_grad_norm

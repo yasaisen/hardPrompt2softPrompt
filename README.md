@@ -166,5 +166,8 @@ file for details.
 ## Acknowledgements
 
 The implementation makes heavy use of PyTorch and the Hugging Face Transformers library.
+**“Final reminder: no matter who you are, please learn from my painful lesson — *always fully understand the concept before implementing it.* This project was not inherently complicated, but it dragged on for a very long time, and the suffering throughout all stemmed from my laziness.”**
 
 
+24G 6, 1, 1b float32
+40G 12, 1, 1b float32
