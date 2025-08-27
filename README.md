@@ -95,7 +95,7 @@ conversation_history = [
 ]
 ```
 
-### generate a response
+### Generate response
 ```python
 conversation_history = model.generate_response( 
     asked_question=asked_question, 
@@ -125,8 +125,8 @@ The script logs metrics to `outputs/<timestamp>` and saves the best model checkp
 
 ### Policy model training
 
-1. Prepare a JSON dataset in which each item contains the conversation context under the key ontext`.  See `singleStepPPO_v1_Dataset` for the expected format.
-2. Create a YAML configuration such as `hardPrompt2softPrompt/projects/trainPM_2506111413.yaml`.
+1. Prepare a JSON dataset in which each item contains the conversation context under the key `context`.  See `singleStepPPO_v1_Dataset` for the expected format.
+2. Create a YAML configuration.  An example is provided in `hardPrompt2softPrompt/projects/trainPM_2508252035.yaml`.
 3. Launch training:
 
 ```bash
