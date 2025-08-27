@@ -432,6 +432,7 @@ class SingleStepPPOTrainer:
 
             # Value loss
             value_loss = F.mse_loss(b_seq_values, sample['rewards']) # (scalar)
+            value_loss = value_loss * self.valueL_coef
             losses['value_loss'] = losses['value_loss'] + value_loss
 
             # KL loss
@@ -444,10 +445,12 @@ class SingleStepPPOTrainer:
                     avg_kl - self.max_kl, 
                     torch.tensor(0.0, device=self.device)
                 ) # (scalar)
+                kl_loss = kl_loss * self.klL_coef
                 losses['kl_loss'] = losses['kl_loss'] + kl_loss
 
             # Entropy loss
             entropy_loss = -b_entropy.mean() # (scalar)
+            entropy_loss = entropy_loss * self.entropyL_coef
             losses['entropy_loss'] = losses['entropy_loss'] + entropy_loss
 
             print("="*30)
