@@ -8,6 +8,9 @@
  last modified in 2508261410
 """
 
+import os
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import torch
 import warnings
 from tqdm import tqdm
@@ -27,20 +30,14 @@ from hardPrompt2softPrompt.models.policyModel.modeling_policyModel import Prefix
 from hardPrompt2softPrompt.trainer.singleStepPPOTrainer.building_singleStepPPOTrainer import SingleStepPPOTrainer
 
 def metric_writer(
-    metric_list: List, 
+    metric_dict: Dict, 
     writer: SummaryWriter, 
     global_step: int, 
-    bsz: int, 
 ):
-    for metric in metric_list:
-        for key in list(metric.keys()):
-            if 'text' in key:
-                continue
-            current = metric[key]
-            if isinstance(current, float):
-                current = torch.tensor([current] * bsz)
-            writer.add_scalar(key, current.mean(), global_step)
-            global_step += 1
+    for key in list(metric_dict.keys()):
+        if isinstance(metric_dict[key], torch.Tensor) or isinstance(metric_dict[key], float):
+            writer.add_scalar(key, metric_dict[key], global_step)
+    global_step += 1
     return global_step
 
 def train_batch_step(
@@ -50,7 +47,6 @@ def train_batch_step(
     cfg_handler: ConfigHandler,
     writer: SummaryWriter, 
     train_global_step: int,
-    bsz: int, 
     mini_batch: int = 10, 
     ppo_Kepochs: int = 3,
 ):
@@ -64,7 +60,7 @@ def train_batch_step(
         end = min(start + mini_batch, len(train_dataset))
         running_dataset = train_dataset[start: end]
 
-        log_print(f'{highlight("batch_step")}', f"[train] ({epoch_idx}) sampling")
+        log_print(f'{highlight("batch_step")}', f"[train] epoch={epoch_idx} sampling")
         rollout_list = ppo_trainer.collect_rollouts(
             b_dataset=running_dataset, 
         )
@@ -78,24 +74,23 @@ def train_batch_step(
         train_metrics_list += [metrics]
 
         for Kepoch_idx in range(ppo_Kepochs):
-            log_print(f'{highlight("batch_step")}', f"[train] ({epoch_idx}) updating")
-            losses, metric_list = ppo_trainer.ppo_loss(
+            log_print(f'{highlight("batch_step")}', f"[train] epoch={epoch_idx} Kepoch={Kepoch_idx} updating")
+            losses, avg_metrics_dict = ppo_trainer.ppo_loss(
                 rollout_list=rollout_list, 
             )
             ppo_trainer.backward(losses=losses)
 
             train_global_step = metric_writer(
-                metric_list=metric_list, 
+                metric_dict=losses | avg_metrics_dict, 
                 writer=writer, 
                 global_step=train_global_step, 
-                bsz=bsz, 
             )
 
             metrics = {
                 'epoch_idx': epoch_idx, 
                 'state': 'train', 
                 'Kepoch_idx': Kepoch_idx, 
-                'metric_list': metric_list, 
+                'metric_list': avg_metrics_dict, 
             }
             cfg_handler.save_result(result=metrics)
             train_metrics_list += [metrics]
@@ -110,10 +105,8 @@ def valid_batch_step(
     cfg_handler: ConfigHandler,
     writer: SummaryWriter, 
     valid_global_step: int,
-    bsz: int, 
 ):
-    valid_metrics_list = []
-    log_print(f'{highlight("batch_step")}', f"[valid] ({epoch_idx}) {len(valid_dataset)}")
+    log_print(f'{highlight("batch_step")}', f"[valid] epoch={epoch_idx}")
     valid_rollout_list = ppo_trainer.collect_rollouts(
         b_dataset=valid_dataset, 
         valid=True, 
@@ -123,7 +116,6 @@ def valid_batch_step(
     #     metric_list=valid_rollout_list, 
     #     writer=writer, 
     #     global_step=valid_global_step, 
-    #     bsz=bsz, 
     # )
 
     reward_diff = sum(s['reward_diff'] for s in valid_rollout_list) / len(valid_rollout_list)
@@ -135,10 +127,9 @@ def valid_batch_step(
         'valid_rollout_list': valid_rollout_list, 
     }
     cfg_handler.save_result(result=metrics)
-    valid_metrics_list += [metrics]
 
     torch.cuda.empty_cache()
-    return valid_metrics_list, valid_global_step
+    return reward_diff, valid_global_step
 
 def main():
     set_seed()
@@ -170,50 +161,40 @@ def main():
 
     print("Start training...")
     best_reward = -5e9
-    avoid_key_list = ['messages_text', 'pol_response_text', 'ref_response_text']
     train_global_step = 0
     valid_global_step = 0
     for epoch_idx in range(num_epoch):
         
-        train_metrics_list, train_global_step = train_batch_step(
-            ppo_trainer=ppo_trainer,
-            train_dataset=train_loader,
-            ppo_Kepochs=ppo_Kepochs,
-            mini_batch=mini_batch, 
-            cfg_handler=cfg_handler,
-            epoch_idx=epoch_idx, 
-            writer=writer, 
-            train_global_step=train_global_step, 
-            bsz=bsz, 
-        )
-        valid_metrics_list, valid_global_step = valid_batch_step(
+        # train_metrics_list, train_global_step = train_batch_step(
+        #     ppo_trainer=ppo_trainer,
+        #     train_dataset=train_loader,
+        #     ppo_Kepochs=ppo_Kepochs,
+        #     mini_batch=mini_batch, 
+        #     cfg_handler=cfg_handler,
+        #     epoch_idx=epoch_idx, 
+        #     writer=writer, 
+        #     train_global_step=train_global_step, 
+        # )
+        reward_diff, valid_global_step = valid_batch_step(
             ppo_trainer=ppo_trainer,
             valid_dataset=valid_loader,
             epoch_idx=epoch_idx, 
             cfg_handler=cfg_handler,
             writer=writer, 
             valid_global_step=valid_global_step,
-            bsz=bsz, 
         )
 
-        # valid_metrics_avg = calu_dict_avg(
-        #     local_metrics_list=[s['valid_rollout_list'] for s in valid_metrics_list], 
-        #     epoch_idx=epoch_idx,
-        #     state='valid',
-        #     avoid_key_list=avoid_key_list,
-        #     show=True,
-        # )
-        # log_print(f'{highlight()}', valid_metrics_list[0]['diff_reward'])
-        # if valid_metrics_list[0]['diff_reward'] > best_reward:
-        #     best_reward = valid_metrics_list[0]['diff_reward']
-        #     cfg_handler.save_weight({
-        #         'epoch_idx': epoch_idx, 
-        #         'diff_reward': valid_metrics_list[0]['diff_reward'], 
-        #         'prefix_embeddings_state_dict': ppo_trainer.policy.prefix_embeddings.detach(),
-        #         'prefix_ids': ppo_trainer.policy.prefix_ids,
-        #         'value_head_state_dict': ppo_trainer.value_head.parameters()
-        #           # TODO value weight saving
-        #     })
+        log_print(f'{highlight()}', reward_diff)
+        if reward_diff > best_reward:
+            best_reward = reward_diff
+            cfg_handler.save_weight({
+                'epoch_idx': epoch_idx, 
+                'diff_reward': reward_diff, 
+                'prefix_embeddings_state_dict': ppo_trainer.policy.prefix_embeddings.detach().cpu(),
+                'prefix_ids': ppo_trainer.policy.prefix_ids,
+                'value_head_state_dict': ppo_trainer.value_head.state_dict()
+                  # TODO value weight saving
+            })
 
     print("Training finished.")
 

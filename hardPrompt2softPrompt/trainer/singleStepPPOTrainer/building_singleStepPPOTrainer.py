@@ -13,14 +13,28 @@ import torch.nn.functional as F
 import torch.optim as optim
 from typing import List, Tuple, Dict
 from tqdm import tqdm
+from statistics import mean
 
 from ...common.utils import log_print, highlight_show, highlight, grad_checker
 from ...models.rewardModel.modeling_rewardModel import ComparativeRewardModel
 from ...models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 from ...models.valueHead.modeling_valueHead import ValueHead
 
-
 from dataclasses import dataclass
+
+def off_loader(
+    sample_dict: Dict, 
+    into_log: bool = False, 
+    device: str = 'cpu', 
+):
+    for key in list(sample_dict.keys()):
+        if isinstance(sample_dict[key], torch.Tensor):
+            sample_dict[key] = sample_dict[key].to(device)
+        if into_log:
+            if isinstance(sample_dict[key], torch.Tensor):
+                sample_dict[key] = sample_dict[key].clone().detach().cpu().mean().item()
+    torch.cuda.empty_cache()
+    return sample_dict
 
 @dataclass
 class optConfig:
@@ -238,6 +252,7 @@ class SingleStepPPOTrainer:
     def collect_rollouts(self, 
         b_dataset: List[List[Dict[str, str]]],  # [num_batches, bsz, chat_format]
         valid: bool = False, 
+        calc_diff: bool = True, 
     ) -> List[Dict]:
         log_print('collect_rollouts', f"Processing {len(b_dataset)} batches...")
         
@@ -288,12 +303,13 @@ class SingleStepPPOTrainer:
             )
             b_rewards_n = (b_rewards - b_rewards.mean()) / b_rewards.std().clamp_min(1e-8)
             # b_rewards: [bsz]
-            rollout['rewards'] = b_rewards_n.detach()
+            rollout['rewards'] = b_rewards.detach()
+            rollout['rewards_n'] = b_rewards_n.detach()
 
             b_advantages = b_rewards - b_seq_values # [bsz]
-            b_advantages_n = (b_advantages - b_advantages.mean()) / b_advantages.std().clamp_min(1e-8)
+            # b_advantages_n = (b_advantages - b_advantages.mean()) / b_advantages.std().clamp_min(1e-8)
             # b_advantages: [bsz]
-            rollout['advantages'] = b_advantages_n.detach()
+            rollout['advantages'] = b_advantages.detach()
 
             ###############################################
 
@@ -308,45 +324,53 @@ class SingleStepPPOTrainer:
                 # b_ref_response_logits: [bsz, max_new_tokens, vocab_size]
                 rollout['b_ref_response_logits'] = b_ref_response_logits.detach()
 
-            if valid:
-                valid_rollout = {}
-                valid_rollout['messages_text'] = rollout['messages_text']
-                valid_rollout['pol_response_text'] = rollout['response_text']
-                valid_rollout['pol_rewards'] = b_rewards.detach()
+            ###############################################
 
+            if calc_diff or valid:
                 _, b_response_text_ref, _ = self.get_response(
                     b_messages=b_messages, # [bsz, (chat_format)]
                     use_prefix=False, 
                     temperature=self.temperature, 
                 )
-                valid_rollout['ref_response_text'] = b_response_text_ref # [bsz, (response_text)]
+                rollout['response_text_ref'] = b_response_text_ref # [bsz, (response_text)]
 
-                b_rewards = self.compute_batch_reward(
+                b_rewards_ref = self.compute_batch_reward(
                     b_messages=b_contexts, # [bsz, str(chat_format)]
                     b_response_text=b_response_text_ref, # [bsz, (response_text)]
                 )
                 # b_rewards: [bsz]
-                valid_rollout['ref_rewards'] = b_rewards.detach()
+                rollout['rewards_ref'] = b_rewards_ref.detach()
+                rollout['reward_diff'] = (rollout['rewards'] - rollout['rewards_ref']).mean()
 
-                valid_rollout['reward_diff'] = (valid_rollout['pol_rewards'] - valid_rollout['ref_rewards']).mean().item()
+            if valid:
+                valid_rollout = {}
+                valid_rollout['messages_text'] = rollout['messages_text']
+                valid_rollout['pol_response_text'] = rollout['response_text']
+                valid_rollout['pol_rewards'] = rollout['rewards']
+                valid_rollout['ref_response_text'] = rollout['response_text_ref']
+                valid_rollout['ref_rewards'] = rollout['rewards_ref']
+                valid_rollout['reward_diff'] = rollout['reward_diff']
 
+                print("="*30)
+                for key in list(valid_rollout.keys()):
+                    if 'text' not in key:
+                        log_print("collect_rollouts", f"{highlight(key)} {valid_rollout[key]}")
+                print("="*30, '\n')
+
+                valid_rollout = off_loader(
+                    sample_dict=valid_rollout, 
+                    into_log=True, 
+                    device='cpu', 
+                )
                 valid_rollout_list += [valid_rollout]
 
-            for key in list(rollout.keys()):
-                if isinstance(rollout[key], torch.Tensor):
-                    rollout[key] = rollout[key].cpu()
-            torch.cuda.empty_cache()
+            rollout = off_loader(
+                sample_dict=rollout, 
+                device='cpu', 
+            )
             rollout_list += [rollout]
-            # print(rollout)
 
         if valid:
-            print("="*30)
-            for sample in valid_rollout_list:
-                for key in list(sample.keys()):
-                    if 'text' not in key:
-                        log_print("collect_rollouts", f"{highlight(key)} {sample[key]}")
-            print("="*30, '\n')
-
             return valid_rollout_list
 
         return rollout_list
@@ -354,17 +378,26 @@ class SingleStepPPOTrainer:
     def ppo_loss(self, 
         rollout_list: List[Dict], 
     ) -> Tuple[Dict[str, torch.Tensor], List[Dict[str, torch.Tensor]]]:
-        log_print(f'{highlight("ppo_loss")}', f"")
+
+        losses = {
+            'policy_loss': torch.zeros((), device=self.device), 
+            'value_loss': torch.zeros((), device=self.device),
+            'entropy_loss': torch.zeros((), device=self.device),
+        }
+        if self.use_kl:
+            losses['kl_loss'] = torch.zeros((), device=self.device)
+
         metric_list = []
         for sample in rollout_list:
-            for key in list(sample.keys()):
-                if isinstance(sample[key], torch.Tensor):
-                    sample[key] = sample[key].to(self.device)
-
+            sample = off_loader(
+                sample_dict=sample, 
+                device=self.device, 
+            )
             metrics = {}
+            metrics['reward_diff'] = sample['reward_diff']
             metrics['old_logp'] = sample['seq_old_logp']
             metrics['old_values'] = sample['seq_old_values']
-            metrics['old_rewards'] = sample['rewards']
+            metrics['old_rewards'] = sample['rewards_n']
             metrics['advantages'] = sample['advantages']
 
             b_last_prompt_hidden_state, b_seq_logp, b_entropy, b_response_logits = self.get_full_forward(
@@ -390,13 +423,16 @@ class SingleStepPPOTrainer:
             ###############################################
 
             # PPO policy loss
-            metrics['ratio'] = torch.exp(b_seq_logp - sample['seq_old_logp']) # [bsz]
-            surr1 = metrics['ratio'] * sample['advantages'] # [bsz]
-            surr2 = torch.clamp(metrics['ratio'], 1 - self.clip_epsilon, 1 + self.clip_epsilon) * sample['advantages']
-            metrics['policy_loss'] = -torch.min(surr1, surr2).mean() # (scalar)
+            ratio = torch.exp(b_seq_logp - sample['seq_old_logp']) # [bsz]
+            metrics['ratio'] = ratio
+            surr1 = ratio * sample['advantages'] # [bsz]
+            surr2 = torch.clamp(ratio, 1 - self.clip_epsilon, 1 + self.clip_epsilon) * sample['advantages']
+            policy_loss = -torch.min(surr1, surr2).mean() # (scalar)
+            losses['policy_loss'] = losses['policy_loss'] + policy_loss
 
             # Value loss
-            metrics['value_loss'] = F.mse_loss(b_seq_values, sample['rewards'] * 0.8) # (scalar)
+            value_loss = F.mse_loss(b_seq_values, sample['rewards']) # (scalar)
+            losses['value_loss'] = losses['value_loss'] + value_loss
 
             # KL loss
             if self.use_kl:
@@ -404,38 +440,36 @@ class SingleStepPPOTrainer:
                     policy_logits=b_response_logits, 
                     reference_logits=sample['b_ref_response_logits'], 
                 )
-                metrics['kl_loss'] = torch.max(
+                kl_loss = torch.max(
                     avg_kl - self.max_kl, 
                     torch.tensor(0.0, device=self.device)
                 ) # (scalar)
+                losses['kl_loss'] = losses['kl_loss'] + kl_loss
 
             # Entropy loss
-            metrics['entropy_loss'] = -b_entropy.mean() # (scalar)
+            entropy_loss = -b_entropy.mean() # (scalar)
+            losses['entropy_loss'] = losses['entropy_loss'] + entropy_loss
 
-            for key in list(metrics.keys()):
-                if 'loss' in key:
-                    continue
-                if isinstance(metrics[key], torch.Tensor):
-                    metrics[key] = metrics[key].cpu()
-            torch.cuda.empty_cache()
-            metric_list += [metrics]
-            
             print("="*30)
             for idx, key in enumerate(list(metrics.keys())):
                 log_print("ppo_loss", f"{highlight(key)} {metrics[key]}")
-                if isinstance(metrics[key], torch.Tensor) and (not metrics[key].requires_grad) and idx <= 3:
-                    print("passed")
-                if isinstance(metrics[key], torch.Tensor) and metrics[key].requires_grad and idx > 3:
-                    print("passed")
+                if isinstance(metrics[key], torch.Tensor) and metrics[key].requires_grad and idx <= 3:
+                    raise f"[{key}] meowmeowmeowmeowmeowmeow"
+                if isinstance(metrics[key], torch.Tensor) and (not metrics[key].requires_grad) and idx > 3:
+                    raise f"[{key}] meowmeowmeowmeowmeowmeow"
             print("="*30, '\n')
 
-        losses = {
-            'policy_loss': torch.stack([m['policy_loss'] for m in metric_list]).mean(), 
-            # 'kl_loss': torch.stack([m['kl_loss'] for m in metric_list]).mean() * self.klL_coef,
-            'value_loss': torch.stack([m['value_loss'] for m in metric_list]).mean() * self.valueL_coef,
-            'entropy_loss': torch.stack([m['entropy_loss'] for m in metric_list]).mean() * self.entropyL_coef,
-        }
+            metrics = off_loader(
+                sample_dict=metrics, 
+                into_log=True, 
+                device='cpu', 
+            )
+            metric_list += [metrics]
+
+        avg_metrics_dict = {k: mean(d[k] for d in metric_list) for k in metric_list[0].keys()}
+
         for key in list(losses.keys()):
+            losses[key] = losses[key] / len(rollout_list)
             if not losses[key].requires_grad:
                 raise f"[{key}] meowmeowmeowmeowmeowmeow"
 
@@ -445,8 +479,9 @@ class SingleStepPPOTrainer:
             # losses['value_loss'] + 
             losses['entropy_loss']
         )
+        # losses['total_loss'] = losses['policy_loss']
         
-        return losses, metric_list
+        return losses, avg_metrics_dict
 
     def backward(self, 
         losses: Dict
@@ -455,8 +490,14 @@ class SingleStepPPOTrainer:
         self.optimizer_value.zero_grad()
         losses['total_loss'].backward()
         losses['value_loss'].backward()
-        torch.nn.utils.clip_grad_norm_(self.policy.prefix_embeddings, self.max_grad_norm)
-        torch.nn.utils.clip_grad_norm_(self.value_head.parameters(), self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(
+            (p for p in self.policy.parameters() if p.requires_grad),
+            self.max_grad_norm
+        )
+        torch.nn.utils.clip_grad_norm_(
+            self.value_head.parameters(),
+            self.max_grad_norm
+        )
         self.optimizer_policy.step()
         self.optimizer_value.step()
         self.scheduler_policy.step()

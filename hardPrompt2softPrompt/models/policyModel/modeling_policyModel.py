@@ -26,7 +26,7 @@ from ...common.utils import (
 
 
 WEIGHT_MAPPING_DICT = {
-    'google/gemma-3-1b-it': 'hard2softModel_v1.0_2505142356.pth', 
+    'google/gemma-3-1b-it': 'hard2softModel_v2.0_2508271528.pth', 
 }
 
 
@@ -36,8 +36,8 @@ class PrefixTuningPolicyModel(nn.Module):
 
         prefix_prompt: str = None, 
         checkpoint_path: str = None, 
-        model_max_length: int = None, 
-        min_response_length: int = None, 
+        model_max_length: int = 550, 
+        min_response_length: int = 50, 
         gradient_checkpointing: bool = False,
         device: str = "cuda", 
         torch_dtype = torch.float32,
@@ -102,6 +102,7 @@ class PrefixTuningPolicyModel(nn.Module):
         if self.model_name == 'google/gemma-3-4b-it':
             self.base_model = self.base_model.language_model
         self.base_model.config.gradient_checkpointing = gradient_checkpointing
+        self.base_model.config.use_cache = False
         self.hidden_size = self.base_model.config.hidden_size
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
@@ -306,14 +307,10 @@ class PrefixTuningPolicyModel(nn.Module):
 
                     now_str = self.tokenizer.decode(next_tokens[i], skip_special_tokens=True)
                     if detect_string_type(now_str):
-
-                        # log_print('check', f"[{highlight()}] [{next_tokens[i]}] [{now_str}]")
                         unfinished_sequences[i] = 0
 
             if unfinished_sequences.sum() == 0:
                 break
-
-        final_max_len = int(seq_lengths.max().item())
 
         del all_generated
         b_response_text = self.tokenizer.batch_decode(
@@ -458,7 +455,37 @@ class PrefixTuningPolicyModel(nn.Module):
         batched_attention_mask = batched_inputs["attention_mask"]
 
         return batched_input_ids, batched_attention_mask
-    
+
+    def generate_response(self, 
+        asked_question: str, 
+        conversation_history: List, 
+        temperature: int = 1.0, 
+    ):
+        b_messages = [
+            [
+                {
+                    'role': 'assistant', 
+                    'content': [{'type': 'text', 'text': f'好的，題目如下：{asked_question}'}]
+                }
+            ] + conversation_history
+        ]
+        b_messages_ids, b_message_attnmask = self.chat_template_tokenizer(
+            b_messages=b_messages, # [bsz, (chat_format)]
+        )
+        b_response_text, _ = self.generate_response_with_batch(
+            input_ids=b_messages_ids, # [bsz, max_token_len]
+            attention_mask=b_message_attnmask, # [bsz, max_token_len]
+            use_prefix=True,
+            temperature=temperature,
+        )
+        conversation_history = conversation_history + [
+            {
+                'role': 'assistant', 
+                'content': [{'type': 'text', 'text': b_response_text[0]}]
+            }
+        ]
+        return conversation_history
+
     @classmethod
     def from_config(cls, cfg):
         root_path = cfg['task'].get("root_path")
