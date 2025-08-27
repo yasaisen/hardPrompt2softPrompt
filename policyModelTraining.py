@@ -5,7 +5,7 @@
  This file is part of a project licensed under the MIT License.
  See the LICENSE file in the project root for more information.
  
- last modified in 2508261410
+ last modified in 2508271553
 """
 
 import os
@@ -165,16 +165,16 @@ def main():
     valid_global_step = 0
     for epoch_idx in range(num_epoch):
         
-        # train_metrics_list, train_global_step = train_batch_step(
-        #     ppo_trainer=ppo_trainer,
-        #     train_dataset=train_loader,
-        #     ppo_Kepochs=ppo_Kepochs,
-        #     mini_batch=mini_batch, 
-        #     cfg_handler=cfg_handler,
-        #     epoch_idx=epoch_idx, 
-        #     writer=writer, 
-        #     train_global_step=train_global_step, 
-        # )
+        train_metrics_list, train_global_step = train_batch_step(
+            ppo_trainer=ppo_trainer,
+            train_dataset=train_loader,
+            ppo_Kepochs=ppo_Kepochs,
+            mini_batch=mini_batch, 
+            cfg_handler=cfg_handler,
+            epoch_idx=epoch_idx, 
+            writer=writer, 
+            train_global_step=train_global_step, 
+        )
         reward_diff, valid_global_step = valid_batch_step(
             ppo_trainer=ppo_trainer,
             valid_dataset=valid_loader,
@@ -193,7 +193,6 @@ def main():
                 'prefix_embeddings_state_dict': ppo_trainer.policy.prefix_embeddings.detach().cpu(),
                 'prefix_ids': ppo_trainer.policy.prefix_ids,
                 'value_head_state_dict': ppo_trainer.value_head.state_dict()
-                  # TODO value weight saving
             })
 
     print("Training finished.")

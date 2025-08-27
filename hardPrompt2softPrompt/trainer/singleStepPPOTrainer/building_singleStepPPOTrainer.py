@@ -5,7 +5,7 @@
  This file is part of a project licensed under the MIT License.
  See the LICENSE file in the project root for more information.
  
- last modified in 2508251733
+ last modified in 2508271553
 """
 
 import torch
@@ -453,9 +453,9 @@ class SingleStepPPOTrainer:
             print("="*30)
             for idx, key in enumerate(list(metrics.keys())):
                 log_print("ppo_loss", f"{highlight(key)} {metrics[key]}")
-                if isinstance(metrics[key], torch.Tensor) and metrics[key].requires_grad and idx <= 3:
+                if isinstance(metrics[key], torch.Tensor) and metrics[key].requires_grad and idx <= 4:
                     raise f"[{key}] meowmeowmeowmeowmeowmeow"
-                if isinstance(metrics[key], torch.Tensor) and (not metrics[key].requires_grad) and idx > 3:
+                if isinstance(metrics[key], torch.Tensor) and (not metrics[key].requires_grad) and idx > 4:
                     raise f"[{key}] meowmeowmeowmeowmeowmeow"
             print("="*30, '\n')
 
