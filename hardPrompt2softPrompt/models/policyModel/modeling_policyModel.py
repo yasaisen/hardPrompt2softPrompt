@@ -20,7 +20,8 @@ from ...common.utils import (
     log_print, 
     get_trainable_params, 
     highlight, 
-    highlight_show
+    highlight_show, 
+    grad_checker
 )
 
 
@@ -350,7 +351,7 @@ class PrefixTuningPolicyModel(nn.Module):
         logp_gen = F.log_softmax(response_logits / temperature, dim=-1)
         old_logp = logp_gen.gather(
             -1, response_ids.unsqueeze(-1)
-        ).squeeze(-1).detach()
+        ).squeeze(-1)
         seq_old_logp = old_logp.sum(dim=1)
 
         probs = torch.exp(logp_gen)

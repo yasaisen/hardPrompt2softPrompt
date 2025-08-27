@@ -14,7 +14,7 @@ model:
     policy_model_path: ""
     policy_model_name: "google/gemma-3-1b-it"
     prefix_prompt: "You are a tester, and your task is to chat with me more to get more replies from me. You can ask me a question and chat with me based on the question. It doesn't matter if I don't answer your question. Please try to induce me to talk more. If I have questions about the test process or the questions you asked, please use sentences to complete the question hypothesis and guide me to continue to reply to you. Let's start now."
-    max_length: 550
+    max_length: 525
     min_response_length: 50
     grad_checkpointing: True
     torch_dtype: "float32"
@@ -26,8 +26,8 @@ dataset:
 task:
   root_path: ""
   
-  num_epoch: 10
-  batch_size: 4
+  num_epoch: 3
+  batch_size: 6
   mini_batch: 1
   sample_loop: 3
   
@@ -39,7 +39,7 @@ task:
   
   clip_epsilon: 0.2
   max_kl: 0.1
-  valueL_coef: 0.3
+  valueL_coef: 0.4
   klL_coef: 0.5
   entropyL_coef: 0.01
   max_grad_norm: 1.0

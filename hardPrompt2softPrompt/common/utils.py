@@ -306,7 +306,10 @@ def detect_string_type(s):
 
     return not_keep_gen
 
-
+def grad_checker(
+    tensor: torch.Tensor, 
+):
+    log_print(highlight('[CHK]'), f'requires_grad = {tensor.requires_grad} grad_fn = {tensor.grad_fn}')
 
 
 

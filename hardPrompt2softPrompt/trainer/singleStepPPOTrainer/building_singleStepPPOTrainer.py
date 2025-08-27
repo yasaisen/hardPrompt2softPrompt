@@ -14,7 +14,7 @@ import torch.optim as optim
 from typing import List, Tuple, Dict
 from tqdm import tqdm
 
-from ...common.utils import log_print, highlight_show, highlight
+from ...common.utils import log_print, highlight_show, highlight, grad_checker
 from ...models.rewardModel.modeling_rewardModel import ComparativeRewardModel
 from ...models.policyModel.modeling_policyModel import PrefixTuningPolicyModel
 from ...models.valueHead.modeling_valueHead import ValueHead
@@ -354,7 +354,7 @@ class SingleStepPPOTrainer:
     def ppo_loss(self, 
         rollout_list: List[Dict], 
     ) -> Tuple[Dict[str, torch.Tensor], List[Dict[str, torch.Tensor]]]:
-
+        log_print(f'{highlight("ppo_loss")}', f"")
         metric_list = []
         for sample in rollout_list:
             for key in list(sample.keys()):
@@ -394,9 +394,9 @@ class SingleStepPPOTrainer:
             surr1 = metrics['ratio'] * sample['advantages'] # [bsz]
             surr2 = torch.clamp(metrics['ratio'], 1 - self.clip_epsilon, 1 + self.clip_epsilon) * sample['advantages']
             metrics['policy_loss'] = -torch.min(surr1, surr2).mean() # (scalar)
-            
+
             # Value loss
-            metrics['value_loss'] = F.mse_loss(b_seq_values, sample['rewards']) # (scalar)
+            metrics['value_loss'] = F.mse_loss(b_seq_values, sample['rewards'] * 0.8) # (scalar)
 
             # KL loss
             if self.use_kl:
@@ -421,16 +421,24 @@ class SingleStepPPOTrainer:
             metric_list += [metrics]
             
             print("="*30)
-            for key in list(metrics.keys()):
+            for idx, key in enumerate(list(metrics.keys())):
                 log_print("ppo_loss", f"{highlight(key)} {metrics[key]}")
+                if isinstance(metrics[key], torch.Tensor) and (not metrics[key].requires_grad) and idx <= 3:
+                    print("passed")
+                if isinstance(metrics[key], torch.Tensor) and metrics[key].requires_grad and idx > 3:
+                    print("passed")
             print("="*30, '\n')
 
         losses = {
-            'policy_loss': sum(s['policy_loss'] for s in metric_list) / len(metric_list), 
-            # 'kl_loss': (sum(s['kl_loss'] for s in metric_list) / len(metric_list)) * self.klL_coef,
-            'value_loss': (sum(s['value_loss'] for s in metric_list) / len(metric_list)) * self.valueL_coef,
-            'entropy_loss': (sum(s['entropy_loss'] for s in metric_list) / len(metric_list)) * self.entropyL_coef,
+            'policy_loss': torch.stack([m['policy_loss'] for m in metric_list]).mean(), 
+            # 'kl_loss': torch.stack([m['kl_loss'] for m in metric_list]).mean() * self.klL_coef,
+            'value_loss': torch.stack([m['value_loss'] for m in metric_list]).mean() * self.valueL_coef,
+            'entropy_loss': torch.stack([m['entropy_loss'] for m in metric_list]).mean() * self.entropyL_coef,
         }
+        for key in list(losses.keys()):
+            if not losses[key].requires_grad:
+                raise f"[{key}] meowmeowmeowmeowmeowmeow"
+
         losses['total_loss'] = (
             losses['policy_loss'] + 
             # losses['kl_loss'] + 
