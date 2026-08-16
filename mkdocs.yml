@@ -4,26 +4,33 @@ site_url: https://github.com/yasaisen/hardPrompt2softPrompt
 
 theme:
   name: material
-  language: zh-TW
-  # palette:
-  #   - media: "(prefers-color-scheme: light)"
-  #     scheme: default
-  #     primary: indigo
-  #     accent: indigo
-  #     toggle:
-  #       icon: material/brightness-7
-  #       name: Switch to dark mode
-  #   - media: "(prefers-color-scheme: dark)"
-  #     scheme: slate
-  #     primary: indigo
-  #     accent: indigo
-  #     toggle:
-  #       icon: material/brightness-4
-  #       name: Switch to light mode
+  language: en
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: slate
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
   features:
-    - navigation.indexes
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
     - navigation.top
+    - navigation.tracking
     - search.suggest
+    - search.highlight
     - content.code.copy
 
 nav:
