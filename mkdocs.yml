@@ -4,53 +4,27 @@ site_url: https://github.com/yasaisen/hardPrompt2softPrompt
 
 theme:
   name: material
-  language: en
-  font:
-    text: Inter
-    code: JetBrains Mono
-  palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: slate
-      accent: teal
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: black
-      accent: teal
-      toggle:
-        icon: material/weather-sunny
-        name: Switch to light mode
+  language: zh-TW
+  # palette:
+  #   - media: "(prefers-color-scheme: light)"
+  #     scheme: default
+  #     primary: indigo
+  #     accent: indigo
+  #     toggle:
+  #       icon: material/brightness-7
+  #       name: Switch to dark mode
+  #   - media: "(prefers-color-scheme: dark)"
+  #     scheme: slate
+  #     primary: indigo
+  #     accent: indigo
+  #     toggle:
+  #       icon: material/brightness-4
+  #       name: Switch to light mode
   features:
-    - navigation.tabs
-    - navigation.tabs.sticky
-    - navigation.sections
+    - navigation.indexes
     - navigation.top
-    - navigation.tracking
     - search.suggest
-    - search.highlight
     - content.code.copy
 
-extra_javascript:
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
-  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
-
-markdown_extensions:
-  - admonition
-  - pymdownx.details
-  - pymdownx.superfences
-  - pymdownx.highlight:
-      anchor_linenums: true
-      line_spans: __span
-      pygments_lang_class: true
-  - pymdownx.inlinehilite
-  - pymdownx.arithmatex:
-      generic: true
-  - tables
-  - toc:
-      permalink: true
-
 nav:
-  - Overview: index.md
+  - Home: index.md
