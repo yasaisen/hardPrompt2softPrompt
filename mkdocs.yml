@@ -5,7 +5,6 @@ site_url: https://github.com/yasaisen/hardPrompt2softPrompt
 theme:
   name: material
   language: zh-TW
-  custom_dir: docs/overrides # 保留自訂 CSS/樣式空間 (選填)
   
   # 精緻字體設定（標題與內文分開搭配）
   font:
