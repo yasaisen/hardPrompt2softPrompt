@@ -4,14 +4,10 @@ site_url: https://github.com/yasaisen/hardPrompt2softPrompt
 
 theme:
   name: material
-  language: zh-TW
-  
-  # 精緻字體設定（標題與內文分開搭配）
+  language: en
   font:
     text: Inter
     code: JetBrains Mono
-
-  # 現代感深淺色切換（淺色用低調的藍灰/岩板色，深色用深黑配藍綠點綴）
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -19,57 +15,42 @@ theme:
       accent: teal
       toggle:
         icon: material/weather-night
-        name: 切換至深色模式
+        name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: black
       accent: teal
       toggle:
         icon: material/weather-sunny
-        name: 切換至淺色模式
-
-  # 視覺與操作體驗升級的核心功能
+        name: Switch to light mode
   features:
-    # 頂部分頁與流暢換頁
-    - navigation.tabs          # 啟用頂部全域導覽標籤（非常好看且結構分明）
-    - navigation.tabs.sticky   # 滾動時固定頂部導覽列
-    - navigation.sections      # 側邊欄分類標題更清晰
-    - navigation.expand        # 預設展開側邊欄子項目
-    - navigation.instant       # 單頁應用（SPA）般的即時換頁體驗，無閃爍
-    - navigation.instant.progress # 換頁頂部載入進度條
-    - navigation.top           # 快速回頂部按鈕
-    - navigation.tracking      # 網址隨滾動章節自動更新錨點
-    
-    # 搜尋體驗
-    - search.suggest           # 搜尋即時補全
-    - search.highlight         # 搜尋結果關鍵字高亮
-    - search.share             # 支援分享搜尋結果連結
-    
-    # 內容互動
-    - content.code.copy        # 程式碼一鍵複製
-    - content.code.annotate    # 支援在程式碼行尾加上註解按鈕
-    - content.tabs.link        # 跨頁面同步選中的程式碼分頁（例如 Python/JS 選項同步）
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
 
-# 讓 Markdown 排版質感大幅提升的擴充套件
+extra_javascript:
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
 markdown_extensions:
-  - admonition                 # 支援漂亮的提示框 (!!! note, !!! warning 等)
-  - pymdownx.details           # 支援可折疊的詳細資訊區塊 (??? note)
-  - pymdownx.superfences:      # 支援多巢狀程式碼區塊與 Mermaid 圖表
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
-  - pymdownx.highlight:        # 現代語法高亮
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
-  - pymdownx.inlinehilite      # 行內程式碼高亮
-  - pymdownx.tabbed:           # 支援漂亮的分頁切換（如多語言範例碼）
-      alternate_style: true
-  - pymdownx.snippets          # 支援引用其他檔案片段
-  - pymdownx.keys              # 漂亮渲染鍵盤按鍵 (如 ++ctrl+c++)
-  - attr_list                  # 支援為 Markdown 元素自訂 CSS class
-  - def_list                   # 字典列表排版支援
-  - tables                     # 增強型表格
+  - pymdownx.inlinehilite
+  - pymdownx.arithmatex:
+      generic: true
+  - tables
   - toc:
-      permalink: true          # 每個標題右側出現錨點符號 (🔗)
+      permalink: true
+
+nav:
+  - Overview: index.md
