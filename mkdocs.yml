@@ -34,4 +34,4 @@ theme:
     - content.code.copy
 
 nav:
-  - Overview: index.md
+  - Home: index.md
