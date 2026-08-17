@@ -1,155 +1,143 @@
-# HardPrompt2SoftPrompt
+<div class="home-hero" markdown>
 
-**Preference-Optimized Hard-to-Soft Prompt Adaptation with Prefix Tuning and Single-Step PPO**
+<p class="eyebrow">PREFERENCE OPTIMIZATION · PREFIX TUNING</p>
 
-**Keywords:** RLHF, Prefix Tuning, Soft Prompt, Single-Step PPO, Reward Model, Preference Learning
+# Hard Prompt to Soft Prompt
+
+<p class="hero-subtitle">Preference-optimized prompt adaptation with a frozen language model</p>
+
+Convert a human-written instruction into a learnable soft prefix, then optimize only those embeddings with preference feedback and response-level PPO.
+
+[Explore the method](#method){ .md-button .md-button--primary }
+[View the results](#results){ .md-button }
+
+</div>
+
+<div class="project-metrics">
+  <div class="metric">
+    <strong>500</strong>
+    <span>preference pairs</span>
+  </div>
+  <div class="metric">
+    <strong>90.00%</strong>
+    <span>reward-model validation accuracy</span>
+  </div>
+  <div class="metric">
+    <strong>245</strong>
+    <span>policy-training conversations</span>
+  </div>
+  <div class="metric">
+    <strong>Frozen</strong>
+    <span>base language model</span>
+  </div>
+</div>
 
 ## Overview
 
-In task-specific applications, a hand-crafted system prompt can often provide a reasonable behavioral baseline for a large language model, but its responses may still deviate from the preferences of real users or domain experts.
+Hand-crafted system prompts provide a useful behavioral baseline for large language models, but their responses can still differ from the preferences of users or domain experts. This project explores a parameter-efficient alternative to full-model fine-tuning: **initialize a trainable soft prefix from an existing hard prompt, then optimize only that prefix with preference feedback**.
 
-This project explores a parameter-efficient alternative to full-model fine-tuning: **convert an existing hard prompt into a trainable soft prefix and optimize only that prefix using preference feedback**.
+The target application was conversational data collection for assessments involving people potentially affected by Alzheimer's disease. The model was designed to imitate a human tester: maintain the conversation, ask appropriate follow-up questions, and encourage the participant to provide more speech data. Disease analysis and diagnosis were outside the project scope.
 
-The target application was a conversational data-collection setting for assessments involving individuals potentially affected by Alzheimer's disease. The language model was designed to imitate a human tester by maintaining the conversation, asking appropriate follow-up questions, and encouraging the participant to provide more speech data. Disease analysis or diagnosis itself was outside the scope of this project.
+<div class="method-flow" aria-label="Hard prompt optimization pipeline">
+  <span>Hard prompt</span>
+  <b aria-hidden="true">→</b>
+  <span>Token embeddings</span>
+  <b aria-hidden="true">→</b>
+  <span>Learnable soft prefix</span>
+  <b aria-hidden="true">→</b>
+  <span>Preference optimization</span>
+</div>
 
-The central idea is:
-
-> **Hard Prompt → Prompt Embeddings → Learnable Soft Prefix → Preference Optimization**
-
-Instead of randomly initializing soft-prompt parameters, the original human-written prompt is used as a semantically meaningful initialization.
-
----
+> The original prompt supplies a semantically meaningful initialization instead of starting the soft-prompt parameters at random.
 
 ## Method
 
-### 1. Preference Data and Reward Model
+### 1. Preference data and reward model
 
-The original data consisted of Traditional Chinese conversations between real testers and participants during assessment sessions.
+The original data consisted of Traditional Chinese conversations between real testers and participants during assessment sessions. Conversation contexts were randomly truncated, and `google/gemma-3-1b-it` generated two candidate responses for each context. A real tester compared each pair using four labels:
 
-Conversation contexts were randomly truncated, and `google/gemma-3-1b-it` generated two candidate responses for each context. A real tester manually compared the two candidates using four labels:
+- A is better than B
+- B is better than A
+- Both are poor
+- Both are good
 
-* A is better than B
-* B is better than A
-* Both are poor
-* Both are good
+The last two categories were discarded because they provide no directional preference signal. The resulting dataset contained **500 context–better–worse pairs**.
 
-The last two categories were discarded because they did not provide a directional preference signal.
+The reward model used `bert-base-chinese`. Its BERT backbone was frozen, while a **20-token learnable prefix**, context/response projection layers, and an MLP reward head were trained. For context $c$ and response $y$, the model predicts a scalar reward $r(c,y)$ and learns the ordering
 
-This process produced **500 Context–Better–Worse pairwise samples**.
+$$
+r(c,y_{\mathrm{better}}) > r(c,y_{\mathrm{worse}}).
+$$
 
-The Reward Model was based on `bert-base-chinese`. The BERT backbone was frozen, while a **20-token learnable prefix**, context/response projection layers, and an MLP reward head were trained.
+Equivalently, the pairwise objective minimizes
 
-For a context (c) and response (y), the model predicts a scalar reward (r(c,y)). Training encourages:
-
-$$r(c,y_{\text{better}}) > r(c,y_{\text{worse}})$$
-
-using the reward difference with `BCEWithLogitsLoss`.
+$$
+\mathcal{L}_{\mathrm{RM}}
+= -\log \sigma\!\left(r(c,y_{\mathrm{better}})-r(c,y_{\mathrm{worse}})\right).
+$$
 
 The dataset was randomly split into **80% training and 20% validation**.
 
----
+### 2. Hard prompt to soft prompt
 
-### 2. Hard Prompt to Soft Prompt
+The policy model used `google/gemma-3-1b-it`. Rather than initializing prefix parameters randomly, the original tester system prompt was tokenized and its token embeddings were copied directly into trainable prefix embeddings.
 
-The policy model used `google/gemma-3-1b-it`.
+The entire Gemma model remained frozen; **only the soft-prefix embeddings were updated**. This retains the semantics of an already functional prompt while permitting continuous optimization in embedding space.
 
-Instead of initializing prefix parameters randomly, the original tester system prompt was tokenized and its token embeddings were directly copied into trainable prefix embeddings.
+### 3. Single-step PPO
 
-The entire Gemma model was frozen, and **only the soft-prefix embeddings were updated**.
+Policy optimization used **245 historical human assessment conversations**. Conversations were randomly truncated to create training contexts and split using a **98%/2% train–validation ratio**.
 
-Conceptually:
-
-```text
-Human-written hard prompt
-        ↓
-Token embeddings
-        ↓
-Learnable soft prefix
-        ↓
-Preference optimization
-```
-
-This preserves the semantics of an already functional prompt while allowing continuous optimization in embedding space.
-
----
-
-### 3. Single-Step PPO
-
-Policy optimization used **245 historical human assessment conversations**. Conversations were randomly truncated to create training contexts and split using a **98%/2% train-validation ratio**.
-
-In this project, **an entire generated response is treated as one action / decision step**, rather than treating individual generated tokens as separate reinforcement-learning steps. This is referred to as **Single-Step PPO**.
+An entire generated response is treated as one action or decision step, rather than treating every generated token as a separate reinforcement-learning step. This is referred to as **Single-Step PPO**.
 
 For each context:
 
 1. The soft-prefix policy generates a complete response.
-2. The Reward Model assigns a scalar reward.
-3. A Value Head estimates the expected reward.
-4. The reward and value estimate are used to compute the advantage.
-5. A PPO clipped policy-gradient objective updates the soft prefix.
+2. The reward model assigns a scalar reward.
+3. A value head estimates the expected reward.
+4. The reward and value estimate produce the advantage.
+5. A clipped PPO policy-gradient objective updates the soft prefix.
 
-The optimization also included a value loss and entropy regularization.
+The optimization also included value loss and entropy regularization. A reference policy used the same frozen Gemma model with the **original hard prompt**, providing a baseline for comparison.
 
-A reference policy used the same frozen Gemma model with the **original hard prompt**, providing a baseline against which the optimized soft-prefix policy could be compared.
-
-A KL-divergence constraint between the policy and reference distributions was also designed as a stability mechanism. However, due to implementation and training-stability issues, **KL regularization was disabled in the reported experiment**.
-
----
+A KL-divergence constraint between policy and reference distributions was designed as a stability mechanism. Due to implementation and training-stability issues, however, **KL regularization was disabled in the reported experiment**.
 
 ## Results
 
-### Reward Model
+### Reward model
 
-On the single 80/20 train-validation split, the Reward Model achieved:
+<div class="result-callout">
+  <span>Validation pairwise ranking accuracy</span>
+  <strong>90.00%</strong>
+</div>
 
-**90.00% validation pairwise ranking accuracy**
+On the single 80/20 train–validation split, the learned reward function reasonably distinguished tester-preferred responses from less-preferred alternatives within the collected dataset.
 
-This indicates that the learned reward function could reasonably distinguish tester-preferred responses from less-preferred alternatives within the collected dataset.
+### Soft-prompt policy
 
----
+The PPO policy-gradient, value, and entropy objectives remained trainable throughout optimization, although the loss curves oscillated substantially. PPO loss was therefore **not interpreted as evidence of behavioral convergence**.
 
-### Soft-Prompt Policy
+The held-out policy validation subset contained only **5 conversations**:
 
-The PPO policy-gradient, value, and entropy objectives remained trainable throughout optimization, although the loss curves showed substantial oscillation. PPO loss itself was therefore **not interpreted as evidence of behavioral convergence**.
+- The optimized soft-prefix policy received a higher reward-model score in **4 cases**.
+- The original hard-prompt reference received a higher score in **1 case**.
 
-The held-out policy validation subset contained only **5 conversations**.
-
-Among these five samples:
-
-* the optimized soft-prefix policy received a higher Reward Model score than the original hard-prompt reference in **4 cases**;
-* the reference policy received a higher score in **1 case**.
-
-During training, the policy–reference reward difference was also positive for most recorded steps, suggesting that PPO successfully moved the soft prefix toward behaviors favored by the learned Reward Model.
-
----
+During training, the policy–reference reward difference was positive for most recorded steps. This suggests that PPO moved the prefix toward behaviors favored by the learned reward model.
 
 ## Discussion
 
-The main observation of this project is that a human-written hard prompt can serve not only as an inference-time instruction, but also as a **semantic initialization for continuous prompt optimization**.
+The central observation is that a human-written prompt can serve not only as an inference-time instruction, but also as a **semantic initialization for continuous prompt optimization**. The method searches a small parameter space consisting only of prompt embeddings rather than optimizing billions of LLM parameters. It is therefore well suited to tasks where prompting already provides a strong baseline and only moderate behavioral adaptation is needed.
 
-Rather than optimizing billions of LLM parameters, the method searches within a very small parameter space consisting only of the prompt embeddings. This makes the approach particularly suitable for tasks where prompting already provides a strong baseline and only moderate behavioral adaptation is required.
+The findings remain preliminary for three reasons:
 
-However, the results should be interpreted as preliminary.
+1. The reward model used only 500 comparisons. Its 90.00% accuracy came from one random validation split without an independent test set or repeated runs.
+2. The PPO validation subset contained only five samples, which is too small for reliable statistical conclusions.
+3. The **same reward model served as both the PPO training signal and the comparison metric**. Improved surrogate rewards do not independently establish that human testers would prefer the resulting responses.
 
-First, the Reward Model was trained on only 500 pairwise comparisons, and the reported 90.00% accuracy was obtained from a single random validation split without an independent test set or repeated runs.
-
-Second, the PPO validation subset contained only five samples, which is far too small for reliable statistical conclusions.
-
-Most importantly, the **same Reward Model was used both as the PPO training signal and as the metric for comparing the optimized policy with the reference policy**. Therefore, the observed reward improvement demonstrates that the soft prompt successfully optimized the learned surrogate preference objective, but does not independently prove that human testers would prefer the resulting responses.
-
-Potential reward over-optimization also cannot be excluded.
-
-A stronger evaluation would require independent human preference testing, preferably with blinded comparison between responses generated by the original hard prompt and the optimized soft prompt.
-
----
+Potential reward over-optimization therefore cannot be excluded. A stronger evaluation requires independent, blinded human comparison between responses from the original hard prompt and the optimized soft prompt.
 
 ## Conclusion
 
-This project demonstrates a parameter-efficient pipeline for:
+This project demonstrates a parameter-efficient path from a human-written prompt to a preference-optimized soft prefix while keeping the underlying language model frozen. The reward model achieved **90.00% validation ranking accuracy**, and the optimized policy generally received higher surrogate rewards than the hard-prompt reference in the small validation experiment.
 
-**Hard Prompt → Soft Prompt → Preference Optimization**
-
-A human-written prompt is converted directly into trainable embeddings and optimized with a learned Reward Model and response-level Single-Step PPO, while the underlying language model remains frozen.
-
-The Reward Model achieved **90.00% validation ranking accuracy**, and the optimized policy generally obtained higher surrogate rewards than the original hard-prompt reference in the small validation experiment.
-
-The results provide preliminary evidence that **semantically initialized soft prompts can be optimized toward learned human preferences without modifying the base LLM**, while also highlighting the need for larger-scale and independent human evaluation.
+The result provides preliminary evidence that **semantically initialized soft prompts can be optimized toward learned human preferences without modifying the base LLM**, while underscoring the need for larger-scale and independent human evaluation.

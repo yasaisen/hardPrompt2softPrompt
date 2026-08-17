@@ -1,6 +1,7 @@
 name: Deploy Documentation
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -21,9 +22,7 @@ jobs:
           python-version: 3.x
 
       - name: Install dependencies
-        run: |
-          pip install mkdocs-material
+        run: pip install mkdocs-material
 
       - name: Deploy Docs
-        run: |
-          mkdocs gh-deploy --force
+        run: mkdocs gh-deploy --force

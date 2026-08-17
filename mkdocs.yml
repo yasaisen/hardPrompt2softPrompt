@@ -1,6 +1,10 @@
-site_name: hardPrompt2softPrompt
-site_description: a research prototype that converts a fixed hard prompt into a learnable soft prefix using reinforcement learning
-site_url: https://github.com/yasaisen/hardPrompt2softPrompt
+site_name: Hard Prompt to Soft Prompt
+site_description: Preference-optimized hard-to-soft prompt adaptation with prefix tuning and single-step PPO.
+site_author: yasaisen
+site_url: https://yasaisen.github.io/hardPrompt2softPrompt/
+repo_name: yasaisen/hardPrompt2softPrompt
+repo_url: https://github.com/yasaisen/hardPrompt2softPrompt
+edit_uri: ""
 
 theme:
   name: material
@@ -8,6 +12,8 @@ theme:
   font:
     text: Inter
     code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -15,23 +21,48 @@ theme:
       accent: teal
       toggle:
         icon: material/weather-night
-        name: Switch to dark mode
+        name: Use dark theme
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       primary: black
       accent: teal
       toggle:
         icon: material/weather-sunny
-        name: Switch to light mode
+        name: Use light theme
   features:
-    - navigation.tabs
-    - navigation.tabs.sticky
-    - navigation.sections
+    - navigation.instant
     - navigation.top
     - navigation.tracking
+    - toc.follow
     - search.suggest
     - search.highlight
     - content.code.copy
 
 nav:
-  - Home: index.md
+  - Overview: index.md
+
+markdown_extensions:
+  - abbr
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+copyright: Copyright &copy; 2026 hardPrompt2softPrompt
+
+extra:
+  generator: false
