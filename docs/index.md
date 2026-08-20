@@ -6,7 +6,7 @@
 
 <p class="hero-subtitle">Preference-optimized prompt adaptation with a frozen language model</p>
 
-Convert a human-written instruction into a learnable soft prefix, then optimize only those embeddings with preference feedback and response-level PPO.
+Convert a human-written instruction into a learnable soft prefix, then optimize only those embeddings with preference feedback and response-level PPO. [![GitHub](https://img.shields.io/badge/GitHub-View_on_GitHub-181717?style=flat&logo=github)](https://github.com/yasaisen/hardPrompt2softPrompt)
 
 [Explore the method](#method){ .md-button .md-button--primary }
 [View the results](#results){ .md-button }
