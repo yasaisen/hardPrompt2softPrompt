@@ -1,0 +1,840 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Preference-optimized hard-to-soft prompt adaptation with prefix tuning and single-step PPO.">
+      
+      
+        <meta name="author" content="yasaisen">
+      
+      
+        <link rel="canonical" href="https://yasaisen.github.io/hardPrompt2softPrompt/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Hard Prompt to Soft Prompt</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="stylesheets/extra.css">
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="slate" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#hard-prompt-to-soft-prompt" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="." title="Hard Prompt to Soft Prompt" class="md-header__button md-logo" aria-label="Hard Prompt to Soft Prompt" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Hard Prompt to Soft Prompt
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Overview
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="slate" data-md-color-accent="teal"  aria-label="Use dark theme"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Use dark theme" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="teal"  aria-label="Use light theme"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Use light theme" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/yasaisen/hardPrompt2softPrompt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    yasaisen/hardPrompt2softPrompt
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="." title="Hard Prompt to Soft Prompt" class="md-nav__button md-logo" aria-label="Hard Prompt to Soft Prompt" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Hard Prompt to Soft Prompt
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/yasaisen/hardPrompt2softPrompt" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    yasaisen/hardPrompt2softPrompt
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="." class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Method
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Method">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-preference-data-and-reward-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Preference data and reward model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-hard-prompt-to-soft-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Hard prompt to soft prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-single-step-ppo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Single-step PPO
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reward-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reward model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#soft-prompt-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Soft-prompt policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#discussion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discussion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conclusion
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Method
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Method">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-preference-data-and-reward-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Preference data and reward model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-hard-prompt-to-soft-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Hard prompt to soft prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-single-step-ppo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Single-step PPO
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#reward-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reward model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#soft-prompt-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Soft-prompt policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#discussion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Discussion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conclusion
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<div class="home-hero">
+<p class="eyebrow">PREFERENCE OPTIMIZATION · PREFIX TUNING</p>
+<h1 id="hard-prompt-to-soft-prompt">Hard Prompt to Soft Prompt<a class="headerlink" href="#hard-prompt-to-soft-prompt" title="Permanent link">&para;</a></h1>
+<p class="hero-subtitle">Preference-optimized prompt adaptation with a frozen language model</p>
+<p>Convert a human-written instruction into a learnable soft prefix, then optimize only those embeddings with preference feedback and response-level PPO. <a href="https://github.com/yasaisen/hardPrompt2softPrompt"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-View_on_GitHub-181717?style=flat&amp;logo=github" /></a></p>
+<p><a class="md-button md-button--primary" href="#method">Explore the method</a>
+<a class="md-button" href="#results">View the results</a></p>
+</div>
+<div class="project-metrics">
+  <div class="metric">
+    <strong>500</strong>
+    <span>preference pairs</span>
+  </div>
+  <div class="metric">
+    <strong>90.00%</strong>
+    <span>reward-model validation accuracy</span>
+  </div>
+  <div class="metric">
+    <strong>245</strong>
+    <span>policy-training conversations</span>
+  </div>
+  <div class="metric">
+    <strong>Frozen</strong>
+    <span>base language model</span>
+  </div>
+</div>
+
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>Hand-crafted system prompts provide a useful behavioral baseline for large language models, but their responses can still differ from the preferences of users or domain experts. This project explores a parameter-efficient alternative to full-model fine-tuning: <strong>initialize a trainable soft prefix from an existing hard prompt, then optimize only that prefix with preference feedback</strong>.</p>
+<p>The target application was conversational data collection for assessments involving people potentially affected by Alzheimer's disease. The model was designed to imitate a human tester: maintain the conversation, ask appropriate follow-up questions, and encourage the participant to provide more speech data. Disease analysis and diagnosis were outside the project scope.</p>
+<div class="method-flow" aria-label="Hard prompt optimization pipeline">
+  <span>Hard prompt</span>
+  <b aria-hidden="true">→</b>
+  <span>Token embeddings</span>
+  <b aria-hidden="true">→</b>
+  <span>Learnable soft prefix</span>
+  <b aria-hidden="true">→</b>
+  <span>Preference optimization</span>
+</div>
+
+<blockquote>
+<p>The original prompt supplies a semantically meaningful initialization instead of starting the soft-prompt parameters at random.</p>
+</blockquote>
+<h2 id="method">Method<a class="headerlink" href="#method" title="Permanent link">&para;</a></h2>
+<h3 id="1-preference-data-and-reward-model">1. Preference data and reward model<a class="headerlink" href="#1-preference-data-and-reward-model" title="Permanent link">&para;</a></h3>
+<p>The original data consisted of Traditional Chinese conversations between real testers and participants during assessment sessions. Conversation contexts were randomly truncated, and <code>google/gemma-3-1b-it</code> generated two candidate responses for each context. A real tester compared each pair using four labels:</p>
+<ul>
+<li>A is better than B</li>
+<li>B is better than A</li>
+<li>Both are poor</li>
+<li>Both are good</li>
+</ul>
+<p>The last two categories were discarded because they provide no directional preference signal. The resulting dataset contained <strong>500 context–better–worse pairs</strong>.</p>
+<p>The reward model used <code>bert-base-chinese</code>. Its BERT backbone was frozen, while a <strong>20-token learnable prefix</strong>, context/response projection layers, and an MLP reward head were trained. For context <span class="arithmatex">\(c\)</span> and response <span class="arithmatex">\(y\)</span>, the model predicts a scalar reward <span class="arithmatex">\(r(c,y)\)</span> and learns the ordering</p>
+<div class="arithmatex">\[
+r(c,y_{\mathrm{better}}) &gt; r(c,y_{\mathrm{worse}}).
+\]</div>
+<p>Equivalently, the pairwise objective minimizes</p>
+<div class="arithmatex">\[
+\mathcal{L}_{\mathrm{RM}}
+= -\log \sigma\!\left(r(c,y_{\mathrm{better}})-r(c,y_{\mathrm{worse}})\right).
+\]</div>
+<figure class="research-figure research-figure--diagram">
+  <a class="research-figure__frame" href="imgs/rewardModel_arch.png" aria-label="Open the full-size reward-model architecture diagram">
+    <img src="imgs/rewardModel_arch.png" alt="Pairwise reward-model architecture with shared BERT scoring paths for better and worse responses" loading="lazy" decoding="async">
+  </a>
+  <figcaption><strong>Figure 1.</strong> Pairwise reward-model training. The same scoring model evaluates the preferred and non-preferred responses; their reward difference is optimized with <code>BCEWithLogitsLoss</code>.</figcaption>
+</figure>
+
+<p>The dataset was randomly split into <strong>80% training and 20% validation</strong>.</p>
+<h3 id="2-hard-prompt-to-soft-prompt">2. Hard prompt to soft prompt<a class="headerlink" href="#2-hard-prompt-to-soft-prompt" title="Permanent link">&para;</a></h3>
+<p>The policy model used <code>google/gemma-3-1b-it</code>. Rather than initializing prefix parameters randomly, the original tester system prompt was tokenized and its token embeddings were copied directly into trainable prefix embeddings.</p>
+<p>The entire Gemma model remained frozen; <strong>only the soft-prefix embeddings were updated</strong>. This retains the semantics of an already functional prompt while permitting continuous optimization in embedding space.</p>
+<h3 id="3-single-step-ppo">3. Single-step PPO<a class="headerlink" href="#3-single-step-ppo" title="Permanent link">&para;</a></h3>
+<p>Policy optimization used <strong>245 historical human assessment conversations</strong>. Conversations were randomly truncated to create training contexts and split using a <strong>98%/2% train–validation ratio</strong>.</p>
+<p>An entire generated response is treated as one action or decision step, rather than treating every generated token as a separate reinforcement-learning step. This is referred to as <strong>Single-Step PPO</strong>.</p>
+<figure class="research-figure research-figure--compact">
+  <a class="research-figure__frame" href="imgs/decode_then_prepill.png" aria-label="Open the full-size decoding and prefill diagram">
+    <img src="imgs/decode_then_prepill.png" alt="Autoregressive response decoding followed by a full context-response forward pass" loading="lazy" decoding="async">
+  </a>
+  <figcaption><strong>Figure 2.</strong> Decode, then prefill. A complete response is first sampled autoregressively; the context–response sequence is then forwarded again to collect the logits used by the optimization objective.</figcaption>
+</figure>
+
+<p>For each context:</p>
+<ol>
+<li>The soft-prefix policy generates a complete response.</li>
+<li>The reward model assigns a scalar reward.</li>
+<li>A value head estimates the expected reward.</li>
+<li>The reward and value estimate produce the advantage.</li>
+<li>A clipped PPO policy-gradient objective updates the soft prefix.</li>
+</ol>
+<p>The optimization also included value loss and entropy regularization. A reference policy used the same frozen Gemma model with the <strong>original hard prompt</strong>, providing a baseline for comparison.</p>
+<p>A KL-divergence constraint between policy and reference distributions was designed as a stability mechanism. Due to implementation and training-stability issues, however, <strong>KL regularization was disabled in the reported experiment</strong>.</p>
+<figure class="research-figure research-figure--diagram">
+  <a class="research-figure__frame" href="imgs/policyModel_arch.png" aria-label="Open the full-size policy-training architecture diagram">
+    <img src="imgs/policyModel_arch.png" alt="Single-step PPO policy architecture with warm-up, reward model, value head, policy update, and reference model" loading="lazy" decoding="async">
+  </a>
+  <figcaption><strong>Figure 3.</strong> Single-Step PPO training architecture. The diagram includes the intended optional KL branch; the reported experiment used the policy-gradient, value, and entropy objectives with the KL term disabled.</figcaption>
+</figure>
+
+<h2 id="results">Results<a class="headerlink" href="#results" title="Permanent link">&para;</a></h2>
+<h3 id="reward-model">Reward model<a class="headerlink" href="#reward-model" title="Permanent link">&para;</a></h3>
+<div class="result-callout">
+  <span>Validation pairwise ranking accuracy</span>
+  <strong>90.00%</strong>
+</div>
+
+<p>On the single 80/20 train–validation split, the learned reward function reasonably distinguished tester-preferred responses from less-preferred alternatives within the collected dataset.</p>
+<figure class="research-figure research-figure--plot">
+  <a class="research-figure__frame" href="imgs/rewardModel_reward_diff_plot.png" aria-label="Open the full-size validation reward-difference plot">
+    <img src="imgs/rewardModel_reward_diff_plot.png" alt="Histogram of validation reward differences with 90 percent positive and 10 percent non-positive" loading="lazy" decoding="async">
+  </a>
+  <figcaption><strong>Figure 4.</strong> Validation distribution of the better-minus-worse reward difference. Positive differences represent correct pairwise rankings; 90% of validation pairs fall in this region.</figcaption>
+</figure>
+
+<h3 id="soft-prompt-policy">Soft-prompt policy<a class="headerlink" href="#soft-prompt-policy" title="Permanent link">&para;</a></h3>
+<p>The PPO policy-gradient, value, and entropy objectives remained trainable throughout optimization, although the loss curves oscillated substantially. PPO loss was therefore <strong>not interpreted as evidence of behavioral convergence</strong>.</p>
+<figure class="research-figure research-figure--plot">
+  <a class="research-figure__frame" href="imgs/policyModel_loss_part.png" aria-label="Open the full-size PPO loss plot">
+    <img src="imgs/policyModel_loss_part.png" alt="PPO total, policy-gradient, value, KL, and entropy losses over training steps" loading="lazy" decoding="async">
+  </a>
+  <figcaption><strong>Figure 5.</strong> Recorded policy-training objectives. Their pronounced oscillation motivates avoiding a convergence claim based on PPO loss alone; the KL trace remains zero because regularization was disabled.</figcaption>
+</figure>
+
+<p>The held-out policy validation subset contained only <strong>5 conversations</strong>:</p>
+<ul>
+<li>The optimized soft-prefix policy received a higher reward-model score in <strong>4 cases</strong>.</li>
+<li>The original hard-prompt reference received a higher score in <strong>1 case</strong>.</li>
+</ul>
+<figure class="research-figure research-figure--plot research-figure--compact">
+  <a class="research-figure__frame" href="imgs/policyModel_reward_diff(sample).png" aria-label="Open the full-size per-sample validation reward plot">
+    <img src="imgs/policyModel_reward_diff(sample).png" alt="Grouped bars comparing policy and reference rewards across five validation samples" loading="lazy" decoding="async">
+  </a>
+  <figcaption><strong>Figure 6.</strong> Per-sample surrogate rewards on the five held-out conversations. The optimized policy scores higher in four samples, while the reference scores higher in one.</figcaption>
+</figure>
+
+<p>During training, the policy–reference reward difference was positive for most recorded steps. This suggests that PPO moved the prefix toward behaviors favored by the learned reward model.</p>
+<figure class="research-figure research-figure--plot">
+  <a class="research-figure__frame" href="imgs/policyModel_reward_diff(steps).png" aria-label="Open the full-size training reward-difference plot">
+    <img src="imgs/policyModel_reward_diff(steps).png" alt="Policy-minus-reference reward difference across recorded training steps, with nearly all values above zero" loading="lazy" decoding="async">
+  </a>
+  <figcaption><strong>Figure 7.</strong> Policy-minus-reference reward over recorded training steps. Nearly all differences are positive, although this remains an evaluation against the same learned reward model used for optimization.</figcaption>
+</figure>
+
+<h2 id="discussion">Discussion<a class="headerlink" href="#discussion" title="Permanent link">&para;</a></h2>
+<p>The central observation is that a human-written prompt can serve not only as an inference-time instruction, but also as a <strong>semantic initialization for continuous prompt optimization</strong>. The method searches a small parameter space consisting only of prompt embeddings rather than optimizing billions of LLM parameters. It is therefore well suited to tasks where prompting already provides a strong baseline and only moderate behavioral adaptation is needed.</p>
+<p>The findings remain preliminary for three reasons:</p>
+<ol>
+<li>The reward model used only 500 comparisons. Its 90.00% accuracy came from one random validation split without an independent test set or repeated runs.</li>
+<li>The PPO validation subset contained only five samples, which is too small for reliable statistical conclusions.</li>
+<li>The <strong>same reward model served as both the PPO training signal and the comparison metric</strong>. Improved surrogate rewards do not independently establish that human testers would prefer the resulting responses.</li>
+</ol>
+<p>Potential reward over-optimization therefore cannot be excluded. A stronger evaluation requires independent, blinded human comparison between responses from the original hard prompt and the optimized soft prompt.</p>
+<h2 id="conclusion">Conclusion<a class="headerlink" href="#conclusion" title="Permanent link">&para;</a></h2>
+<p>This project demonstrates a parameter-efficient path from a human-written prompt to a preference-optimized soft prefix while keeping the underlying language model frozen. The reward model achieved <strong>90.00% validation ranking accuracy</strong>, and the optimized policy generally received higher surrogate rewards than the hard-prompt reference in the small validation experiment.</p>
+<p>The result provides preliminary evidence that <strong>semantically initialized soft prompts can be optimized toward learned human preferences without modifying the base LLM</strong>, while underscoring the need for larger-scale and independent human evaluation.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 hardPrompt2softPrompt
+    </div>
+  
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.instant", "navigation.top", "navigation.tracking", "toc.follow", "search.suggest", "search.highlight", "content.code.copy"], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
